@@ -1,6 +1,8 @@
 /* Prototype-only UI: SPA router + localStorage demo data */
 
 const STORAGE_KEY = "doctor-assist-prototype:v1";
+const CONTEXT =
+  typeof window !== "undefined" && window.APP_CONTEXT ? window.APP_CONTEXT : "mono";
 
 function uid(prefix = "id") {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
@@ -46,6 +48,7 @@ function loadState() {
         mobile: "+1 (310) 555-0123",
         age: 29,
         sex: "Female",
+        patientType: "General",
         address: "LA, CA",
         createdAt: new Date().toISOString(),
       },
@@ -55,6 +58,7 @@ function loadState() {
         mobile: "+1 (213) 555-0188",
         age: 41,
         sex: "Male",
+        patientType: "Corporate",
         address: "LA, CA",
         createdAt: new Date().toISOString(),
       },
@@ -185,8 +189,95 @@ function activeNav(route) {
   }
 }
 
+function buildNav() {
+  const nav = $("#nav");
+  if (!nav) return;
+
+  const items =
+    CONTEXT === "central"
+      ? [
+          { route: "/central", icon: "🏥", label: "Central Home" },
+          { route: "/patients", icon: "👤", label: "Patient Database" },
+          { route: "/doctors", icon: "🩺", label: "Doctor Scheduling" },
+          { route: "/billing", icon: "💳", label: "Accounting Monitor" },
+          { route: "/diagnostics", icon: "🧪", label: "Diagnostic Monitor" },
+          { route: "/reports", icon: "📈", label: "Revenue & Analysis" },
+          { route: "/analysis-functions", icon: "🧩", label: "Analysis Functions" },
+          { divider: true },
+          { route: "/ai", icon: "✨", label: "AI (Future)" },
+        ]
+      : CONTEXT === "hub"
+        ? [
+            { route: "/dashboard", icon: "▦", label: "Hub Dashboard" },
+            { route: "/patients", icon: "👤", label: "Patients" },
+            { route: "/appointments", icon: "📅", label: "Appointments" },
+            { route: "/prescriptions", icon: "📝", label: "Prescriptions" },
+            { route: "/diagnostics", icon: "🧪", label: "Diagnostics" },
+            { route: "/billing", icon: "💳", label: "Billing" },
+            { route: "/reports", icon: "📈", label: "Reports" },
+          ]
+        : [
+            { route: "/dashboard", icon: "▦", label: "Dashboard" },
+            { route: "/patients", icon: "👤", label: "Patients" },
+            { route: "/appointments", icon: "📅", label: "Appointments" },
+            { route: "/doctors", icon: "🩺", label: "Doctors" },
+            { route: "/prescriptions", icon: "📝", label: "Prescriptions" },
+            { route: "/diagnostics", icon: "🧪", label: "Diagnostics" },
+            { route: "/billing", icon: "💳", label: "Billing" },
+            { route: "/reports", icon: "📈", label: "Reports" },
+            { divider: true },
+            { route: "/central", icon: "🏥", label: "Central Admin" },
+            { route: "/analysis-functions", icon: "🧩", label: "Analysis Functions" },
+            { route: "/ai", icon: "✨", label: "AI (Future)" },
+          ];
+
+  nav.replaceChildren(
+    ...items.map((it) => {
+      if (it.divider) return el("div", { class: "nav-divider", role: "separator" });
+      return el("a", { class: "nav-item", href: `#${it.route}`, "data-route": it.route }, [
+        el("span", { class: "nav-icon", "aria-hidden": "true" }, [document.createTextNode(it.icon)]),
+        el("span", {}, [document.createTextNode(it.label)]),
+      ]);
+    })
+  );
+}
+
 function money(n) {
   return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(n);
+}
+
+function downloadBlob(filename, mime, data) {
+  const blob = data instanceof Blob ? data : new Blob([data], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function csvEscape(value) {
+  const s = String(value ?? "");
+  if (/[",\n]/.test(s)) return `"${s.replaceAll('"', '""')}"`;
+  return s;
+}
+
+function toCSV(columns, rows) {
+  const head = columns.map((c) => csvEscape(c.label)).join(",");
+  const body = rows
+    .map((r) => columns.map((c) => csvEscape(r[c.key])).join(","))
+    .join("\n");
+  return `${head}\n${body}\n`;
+}
+
+function toXlsHtml(columns, rows, title) {
+  const th = columns.map((c) => `<th>${String(c.label)}</th>`).join("");
+  const trs = rows
+    .map((r) => `<tr>${columns.map((c) => `<td>${String(r[c.key] ?? "")}</td>`).join("")}</tr>`)
+    .join("");
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title></head><body><table border="1"><thead><tr>${th}</tr></thead><tbody>${trs}</tbody></table></body></html>`;
 }
 
 function sumInvoice(inv) {
@@ -284,7 +375,7 @@ function quickPanelCard() {
       el("button", { class: "btn", type: "button", onclick: () => openCreatePatient() }, [document.createTextNode("New patient")]),
       el("button", { class: "btn btn-ghost", type: "button", onclick: () => openBookAppointment() }, [document.createTextNode("Book appointment")]),
       el("button", { class: "btn btn-ghost", type: "button", onclick: () => openCreateInvoice() }, [document.createTextNode("New invoice")]),
-      el("button", { class: "btn btn-ghost", type: "button", onclick: () => openUploadDiagnostic() }, [document.createTextNode("Upload diagnostic")]),
+      el("button", { class: "btn btn-ghost", type: "button", onclick: () => openUploadDiagnosticEnhanced() }, [document.createTextNode("Upload diagnostic")]),
     ]),
     el("div", { class: "help" }, [
       document.createTextNode("Tip: press "),
@@ -559,7 +650,7 @@ function viewDiagnostics() {
     el("div", { class: "card-title" }, [document.createTextNode("Diagnostic & Imaging Management")]),
     el("div", { class: "card-subtitle" }, [document.createTextNode("Upload scan images and generate diagnostic reports (prototype).")]),
     el("div", { class: "card-actions" }, [
-      el("button", { class: "btn", type: "button", onclick: () => openUploadDiagnostic() }, [document.createTextNode("Upload image")]),
+      el("button", { class: "btn", type: "button", onclick: () => openUploadDiagnosticEnhanced() }, [document.createTextNode("Upload image")]),
       el("button", { class: "btn btn-ghost", type: "button", onclick: () => openCreateReport() }, [document.createTextNode("Create report")]),
     ]),
   ]);
@@ -576,7 +667,7 @@ function viewDiagnostics() {
         el("td", {}, [statusChip(d.status)]),
         el("td", {}, [document.createTextNode(d.fileName || "—")]),
         el("td", {}, [
-          el("button", { class: "btn btn-ghost", type: "button", onclick: () => openDiagnosticViewer(d.id) }, [document.createTextNode("View")]),
+          el("button", { class: "btn btn-ghost", type: "button", onclick: () => openDiagnosticViewerEnhanced(d.id) }, [document.createTextNode("View")]),
         ]),
       ]);
     });
@@ -674,66 +765,596 @@ function viewBilling() {
 }
 
 function viewReports() {
-  setTitle("Reports", "Performance, revenue, diagnostic monitoring (demo)");
+  setTitle("Reports", "Daily/monthly and wise reports with export (prototype)");
   activeNav("/reports");
 
-  const totals = state.invoices.reduce(
-    (acc, inv) => {
-      acc.total += sumInvoice(inv);
-      acc.paid += inv.paid || 0;
-      return acc;
-    },
-    { total: 0, paid: 0 }
+  state.notes = state.notes || {};
+  const kinds = [
+    { id: "daily", label: "Daily Report" },
+    { id: "monthly", label: "Monthly Report" },
+    { id: "testWise", label: "Test Wise Report" },
+    { id: "doctorWise", label: "Doctor Wise Report" },
+    { id: "patientTypeWise", label: "Patient Type Wise Report" },
+    { id: "testTypeWise", label: "Test Type Wise Report" },
+    { id: "centerWise", label: "Center Wise Report" },
+    { id: "hubWise", label: "Hub Wise Report" },
+  ];
+
+  const selectedKind = state.notes.reportsKind || "daily";
+  const reportDay = state.notes.reportsDay || todayISO();
+  const reportMonth = state.notes.reportsMonth || reportDay.slice(0, 7);
+  const reportsHubId = state.notes.reportsHubId || "all";
+  const reportsTestName = state.notes.reportsTestName || "all";
+  const reportsDoctorId = state.notes.reportsDoctorId || "all";
+  const reportsPatientType = state.notes.reportsPatientType || "all";
+  const reportsTestType = state.notes.reportsTestType || "all";
+
+  const header = el("div", { class: "card soft" }, [
+    el("div", { class: "card-title" }, [document.createTextNode("Report Menu")]),
+    el("div", { class: "card-subtitle" }, [document.createTextNode("Choose a report type and export CSV/Excel/PDF (print).")]),
+    el("div", { class: "row", style: "margin-top:10px" }, [
+      fieldSelect("Report type", "kind", kinds.map((k) => ({ value: k.id, label: k.label })), selectedKind),
+      fieldInput("Date", "day", "", "date", reportDay),
+    ]),
+    el("div", { class: "card-actions" }, [
+      el("button", {
+        class: "btn",
+        type: "button",
+        onclick: () => {
+          const v = readForm(header);
+          state.notes.reportsKind = v.kind;
+          state.notes.reportsDay = v.day || todayISO();
+          state.notes.reportsMonth = (v.day || todayISO()).slice(0, 7);
+          saveState(state);
+          render();
+        },
+      }, [document.createTextNode("Run report")]),
+    ]),
+  ]);
+
+  const invoiceLines = state.invoices.flatMap((inv) =>
+    (inv.items || []).map((it) => ({
+      invoiceId: inv.id,
+      patientId: inv.patientId,
+      hubId: inv.hubId || "hub_main",
+      createdAt: inv.createdAt,
+      paid: Number(inv.paid || 0),
+      name: it.name,
+      qty: Number(it.qty || 0),
+      unit: Number(it.unit || 0),
+      total: Number(it.qty || 0) * Number(it.unit || 0),
+    }))
   );
-  const due = Math.max(0, totals.total - totals.paid);
-  const pending = state.reports.filter((r) => r.status !== "Verified").length;
 
-  const stats = el("div", { class: "grid cols-3" }, [
-    statCard("Revenue (Billed)", money(totals.total), "All invoices (demo)"),
-    statCard("Collected", money(totals.paid), "Paid amount received"),
-    statCard("Diagnostics Pending", pending, "Awaiting verification"),
+  const hubOptions = [
+    { value: "all", label: "All hubs" },
+    ...state.hubs.map((h) => ({ value: h.id, label: h.name })),
+  ];
+  const testNameOptions = [
+    { value: "all", label: "All tests/services" },
+    ...[...new Set(invoiceLines.map((l) => l.name).filter(Boolean))].sort().map((n) => ({ value: n, label: n })),
+  ];
+  const doctorOptions = [
+    { value: "all", label: "All doctors" },
+    ...state.doctors.map((d) => ({ value: d.id, label: `${d.name} — ${d.specialty}` })),
+  ];
+  const patientTypeOptions = [
+    { value: "all", label: "All patient types" },
+    ...[...new Set(state.patients.map((p) => p.patientType || "General"))].sort().map((t) => ({ value: t, label: t })),
+  ];
+  const testTypeOptions = [
+    { value: "all", label: "All test types" },
+    ...[...new Set(state.diagnostics.map((d) => d.testType || "Unknown"))].sort().map((t) => ({ value: t, label: t })),
+  ];
+
+  const filtersCard = (() => {
+    const rows = [];
+
+    const add = (node) => rows.push(node);
+
+    if (selectedKind === "daily") {
+      add(fieldInput("Daily date", "f_day", "", "date", reportDay));
+      add(fieldSelect("Hub", "f_hubId", hubOptions, reportsHubId));
+      add(fieldSelect("Test/service", "f_testName", testNameOptions, reportsTestName));
+    } else if (selectedKind === "monthly") {
+      add(fieldInput("Month", "f_month", "", "month", reportMonth));
+      add(fieldSelect("Hub", "f_hubId", hubOptions, reportsHubId));
+      add(fieldSelect("Test/service", "f_testName", testNameOptions, reportsTestName));
+    } else if (selectedKind === "testWise") {
+      add(fieldSelect("Test/service", "f_testName", testNameOptions, reportsTestName));
+      add(fieldSelect("Hub", "f_hubId", hubOptions, reportsHubId));
+      add(fieldInput("Date (optional)", "f_day", "", "date", reportDay));
+    } else if (selectedKind === "doctorWise") {
+      add(fieldSelect("Doctor", "f_doctorId", doctorOptions, reportsDoctorId));
+      add(fieldInput("Month (optional)", "f_month", "", "month", reportMonth));
+      add(fieldSelect("Hub (optional)", "f_hubId", hubOptions, reportsHubId));
+    } else if (selectedKind === "patientTypeWise") {
+      add(fieldSelect("Patient type", "f_patientType", patientTypeOptions, reportsPatientType));
+      add(fieldInput("Month (optional)", "f_month", "", "month", reportMonth));
+    } else if (selectedKind === "testTypeWise") {
+      add(fieldSelect("Test type", "f_testType", testTypeOptions, reportsTestType));
+      add(fieldSelect("Hub (optional)", "f_hubId", hubOptions, reportsHubId));
+    } else if (selectedKind === "hubWise") {
+      add(fieldSelect("Hub/Branch", "f_hubId", hubOptions, reportsHubId));
+      add(fieldInput("Month (optional)", "f_month", "", "month", reportMonth));
+    } else if (selectedKind === "centerWise") {
+      add(fieldInput("Month (optional)", "f_month", "", "month", reportMonth));
+    }
+
+    const wrap = el("div", { class: "card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Filters")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Select related data (hub/test/doctor/date) to prepare the report.")]),
+      el("div", { class: "row", style: "margin-top:10px" }, rows),
+      el("div", { class: "card-actions" }, [
+        el("button", {
+          class: "btn",
+          type: "button",
+          onclick: () => {
+            const v = readForm(wrap);
+            if (v.f_day) state.notes.reportsDay = v.f_day;
+            if (v.f_month) state.notes.reportsMonth = v.f_month;
+            if (v.f_hubId) state.notes.reportsHubId = v.f_hubId;
+            if (v.f_testName) state.notes.reportsTestName = v.f_testName;
+            if (v.f_doctorId) state.notes.reportsDoctorId = v.f_doctorId;
+            if (v.f_patientType) state.notes.reportsPatientType = v.f_patientType;
+            if (v.f_testType) state.notes.reportsTestType = v.f_testType;
+            saveState(state);
+            render();
+          },
+        }, [document.createTextNode("Apply filters")]),
+        el("button", {
+          class: "btn btn-ghost",
+          type: "button",
+          onclick: () => {
+            delete state.notes.reportsHubId;
+            delete state.notes.reportsTestName;
+            delete state.notes.reportsDoctorId;
+            delete state.notes.reportsPatientType;
+            delete state.notes.reportsTestType;
+            saveState(state);
+            toast("Filters reset", "Filters cleared for the selected report type.");
+            render();
+          },
+        }, [document.createTextNode("Reset filters")]),
+      ]),
+    ]);
+
+    return wrap;
+  })();
+
+  const groupSum = (rows, keyFn) => {
+    const map = new Map();
+    for (const r of rows) {
+      const key = keyFn(r);
+      map.set(key, (map.get(key) || 0) + (r.total || 0));
+    }
+    return [...map.entries()].sort((a, b) => b[1] - a[1]);
+  };
+
+  const filteredInvoiceLines = invoiceLines.filter((r) => {
+    if (reportsHubId !== "all" && (r.hubId || "hub_main") !== reportsHubId) return false;
+    if (reportsTestName !== "all" && (r.name || "") !== reportsTestName) return false;
+    return true;
+  });
+
+  const byDay = filteredInvoiceLines.filter((r) => (r.createdAt || "").slice(0, 10) === reportDay);
+  const byMonth = filteredInvoiceLines.filter((r) => (r.createdAt || "").slice(0, 7) === reportMonth);
+
+  const makeTable = (title, columns, rows) => {
+    const csvName = `${title.replaceAll(" ", "_").toLowerCase()}_${Date.now()}.csv`;
+    const xlsName = `${title.replaceAll(" ", "_").toLowerCase()}_${Date.now()}.xls`;
+    const pdfTitle = `${title} (${selectedKind})`;
+
+    const actions = el("div", { class: "card-actions" }, [
+      el("button", {
+        class: "btn btn-ghost",
+        type: "button",
+        onclick: () => downloadBlob(csvName, "text/csv;charset=utf-8", toCSV(columns, rows)),
+      }, [document.createTextNode("Export CSV")]),
+      el("button", {
+        class: "btn btn-ghost",
+        type: "button",
+        onclick: () => downloadBlob(xlsName, "application/vnd.ms-excel;charset=utf-8", toXlsHtml(columns, rows, pdfTitle)),
+      }, [document.createTextNode("Export Excel")]),
+      el("button", { class: "btn btn-ghost", type: "button", onclick: () => window.print() }, [document.createTextNode("Export PDF")]),
+    ]);
+
+    const table = el("table", { class: "table", style: "margin-top:10px" }, [
+      el("thead", {}, [
+        el("tr", {}, columns.map((c) => el("th", {}, [document.createTextNode(c.label)]))),
+      ]),
+      el(
+        "tbody",
+        {},
+        rows.length
+          ? rows.map((r) =>
+              el("tr", {}, columns.map((c) => el("td", {}, [document.createTextNode(String(r[c.key] ?? ""))])))
+            )
+          : [el("tr", {}, [el("td", { colspan: `${columns.length}` }, [renderEmpty()])])]
+      ),
+    ]);
+
+    return el("div", { class: "card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode(title)]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode(`Report type: ${kinds.find((k) => k.id === selectedKind)?.label || selectedKind}`)]),
+      actions,
+      table,
+    ]);
+  };
+
+  let title = "Daily Report";
+  let columns = [];
+  let rows = [];
+
+  if (selectedKind === "daily") {
+    title = `Daily Report (${reportDay})`;
+    const pairs = groupSum(byDay, (r) => r.name || "Unknown");
+    columns = [
+      { key: "service", label: "Service/Test" },
+      { key: "revenue", label: "Revenue" },
+    ];
+    rows = pairs.map(([service, revenue]) => ({ service, revenue: money(revenue) }));
+  } else if (selectedKind === "monthly") {
+    title = `Monthly Report (${reportMonth})`;
+    const pairs = groupSum(byMonth, (r) => r.name || "Unknown");
+    columns = [
+      { key: "service", label: "Service/Test" },
+      { key: "revenue", label: "Revenue" },
+    ];
+    rows = pairs.map(([service, revenue]) => ({ service, revenue: money(revenue) }));
+  } else if (selectedKind === "testWise") {
+    title = "Test Wise Report";
+    if (reportsTestName !== "all") {
+      columns = [
+        { key: "invoiceId", label: "Invoice" },
+        { key: "date", label: "Date" },
+        { key: "hub", label: "Hub" },
+        { key: "test", label: "Test/Service" },
+        { key: "amount", label: "Amount" },
+      ];
+      const lines = filteredInvoiceLines
+        .filter((r) => (r.createdAt || "").slice(0, 10) === reportDay || selectedKind === "testWise")
+        .slice()
+        .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+      rows = lines.map((l) => ({
+        invoiceId: l.invoiceId,
+        date: (l.createdAt || "").slice(0, 10),
+        hub: findById(state.hubs, l.hubId)?.name || l.hubId,
+        test: l.name,
+        amount: money(l.total || 0),
+      }));
+    } else {
+      const pairs = groupSum(filteredInvoiceLines, (r) => r.name || "Unknown");
+      columns = [
+        { key: "test", label: "Test/Service" },
+        { key: "revenue", label: "Revenue" },
+      ];
+      rows = pairs.map(([test, revenue]) => ({ test, revenue: money(revenue) }));
+    }
+  } else if (selectedKind === "doctorWise") {
+    title = "Doctor Wise Report";
+    const appts = state.appointments.filter((a) => {
+      if (reportsDoctorId !== "all" && a.doctorId !== reportsDoctorId) return false;
+      if (reportsHubId !== "all" && (a.hubId || "hub_main") !== reportsHubId) return false;
+      if (reportMonth && (a.date || "").slice(0, 7) !== reportMonth) return false;
+      return true;
+    });
+    columns = [
+      { key: "doctor", label: "Doctor" },
+      { key: "appointments", label: "Appointments" },
+    ];
+    if (reportsDoctorId !== "all") {
+      const d = findById(state.doctors, reportsDoctorId);
+      columns = [
+        { key: "date", label: "Date" },
+        { key: "time", label: "Time" },
+        { key: "hub", label: "Hub" },
+        { key: "patient", label: "Patient" },
+        { key: "status", label: "Status" },
+      ];
+      rows = appts
+        .slice()
+        .sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time))
+        .map((a) => {
+          const p = findById(state.patients, a.patientId);
+          return {
+            date: a.date,
+            time: a.time,
+            hub: findById(state.hubs, a.hubId || "hub_main")?.name || a.hubId || "—",
+            patient: p?.name || "Unknown",
+            status: a.status,
+          };
+        });
+      title = `Doctor Wise Report (${d?.name || "Doctor"})`;
+    } else {
+      rows = state.doctors
+        .map((d) => ({
+          doctor: d.name,
+          appointments: appts.filter((a) => a.doctorId === d.id).length,
+        }))
+        .sort((a, b) => b.appointments - a.appointments);
+    }
+  } else if (selectedKind === "patientTypeWise") {
+    title = "Patient Type Wise Report";
+    const pairs = (() => {
+      const map = new Map();
+      for (const a of state.appointments) {
+        const p = findById(state.patients, a.patientId);
+        const t = p?.patientType || "General";
+        if (reportsPatientType !== "all" && t !== reportsPatientType) continue;
+        if (reportMonth && (a.date || "").slice(0, 7) !== reportMonth) continue;
+        map.set(t, (map.get(t) || 0) + 1);
+      }
+      return [...map.entries()].sort((a, b) => b[1] - a[1]);
+    })();
+    columns = [
+      { key: "patientType", label: "Patient Type" },
+      { key: "visits", label: "Visits/Appointments" },
+    ];
+    rows = pairs.map(([patientType, visits]) => ({ patientType, visits }));
+  } else if (selectedKind === "testTypeWise") {
+    title = "Test Type Wise Report";
+    const pairs = (() => {
+      const map = new Map();
+      for (const d of state.diagnostics) {
+        const t = d.testType || "Unknown";
+        if (reportsTestType !== "all" && t !== reportsTestType) continue;
+        if (reportsHubId !== "all" && (d.hubId || "hub_main") !== reportsHubId) continue;
+        map.set(t, (map.get(t) || 0) + 1);
+      }
+      return [...map.entries()].sort((a, b) => b[1] - a[1]);
+    })();
+    columns = [
+      { key: "testType", label: "Test Type" },
+      { key: "count", label: "Count" },
+    ];
+    rows = pairs.map(([testType, count]) => ({ testType, count }));
+  } else if (selectedKind === "centerWise") {
+    title = "Center Wise Report";
+    columns = [
+      { key: "center", label: "Center" },
+      { key: "appointments", label: "Appointments" },
+      { key: "reportsPending", label: "Reports Pending" },
+      { key: "revenue", label: "Revenue (Billed)" },
+    ];
+    const revenue = filteredInvoiceLines.reduce((acc, r) => acc + (r.total || 0), 0);
+    rows = [
+      {
+        center: "Central (All Hubs)",
+        appointments: state.appointments.length,
+        reportsPending: state.reports.filter((r) => r.status !== "Verified").length,
+        revenue: money(revenue),
+      },
+    ];
+  } else if (selectedKind === "hubWise") {
+    title = "Hub Wise Report";
+    columns = [
+      { key: "hub", label: "Hub/Branch" },
+      { key: "appointments", label: "Appointments" },
+      { key: "revenue", label: "Revenue (Billed)" },
+      { key: "reportsPending", label: "Reports Pending" },
+    ];
+    const hubsToShow = reportsHubId === "all" ? state.hubs : state.hubs.filter((h) => h.id === reportsHubId);
+    rows = hubsToShow
+      .map((h) => {
+        const hubId = h.id;
+        const revenue = filteredInvoiceLines.filter((r) => (r.hubId || "hub_main") === hubId && (!reportMonth || (r.createdAt || "").slice(0, 7) === reportMonth)).reduce((acc, r) => acc + (r.total || 0), 0);
+        return {
+          hub: h.name,
+          appointments: state.appointments.filter((a) => (a.hubId || "hub_main") === hubId && (!reportMonth || (a.date || "").slice(0, 7) === reportMonth)).length,
+          revenue: money(revenue),
+          reportsPending: state.reports.filter((r) => (r.hubId || "hub_main") === hubId && r.status !== "Verified").length,
+        };
+      })
+      .sort((a, b) => Number(String(b.revenue).replace(/[^\d.]/g, "")) - Number(String(a.revenue).replace(/[^\d.]/g, "")));
+  }
+
+  const menuChips = el(
+    "div",
+    { class: "card", style: "padding:10px" },
+    [
+      el("div", { class: "card-title" }, [document.createTextNode("Quick Menu")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Daily, Monthly, and wise reports: test/doctor/patient type/test type/center/hub.")]),
+      el("div", { class: "row", style: "margin-top:10px" }, [
+        fieldSelect("Report type", "quickKind", kinds.map((k) => ({ value: k.id, label: k.label })), selectedKind),
+        el("div", { class: "field" }, [
+          el("label", {}, [document.createTextNode("Action")]),
+          el(
+            "button",
+            {
+              class: "btn",
+              type: "button",
+              onclick: () => {
+                const v = readForm(menuChips);
+                state.notes.reportsKind = v.quickKind;
+                saveState(state);
+                render();
+              },
+            },
+            [document.createTextNode("Apply")]
+          ),
+        ]),
+      ]),
+      el(
+        "div",
+        { style: "margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;" },
+        kinds.map((k) =>
+          el(
+            "button",
+            {
+              class: k.id === selectedKind ? "chip good" : "chip",
+              type: "button",
+              onclick: () => {
+                state.notes.reportsKind = k.id;
+                saveState(state);
+                render();
+              },
+            },
+            [document.createTextNode(k.label)]
+          )
+        )
+      ),
+    ]
+  );
+
+  return el("div", { class: "grid" }, [header, filtersCard, menuChips, makeTable(title, columns, rows)]);
+}
+
+function viewAnalysisFunctions() {
+  setTitle("Analysis Functions", "Pre-built analysis views (prototype)");
+  activeNav("/analysis-functions");
+
+  const invoiceLines = state.invoices.flatMap((inv) =>
+    (inv.items || []).map((it) => ({
+      invoiceId: inv.id,
+      createdAt: inv.createdAt,
+      hubId: inv.hubId,
+      name: it.name,
+      qty: Number(it.qty || 0),
+      unit: Number(it.unit || 0),
+      total: Number(it.qty || 0) * Number(it.unit || 0),
+    }))
+  );
+
+  const groupSum = (rows, keyFn) => {
+    const map = new Map();
+    for (const r of rows) {
+      const key = keyFn(r);
+      map.set(key, (map.get(key) || 0) + (r.total || 0));
+    }
+    return [...map.entries()].sort((a, b) => b[1] - a[1]);
+  };
+
+  const tableFromPairs = (title, pairs, valueFmt = money) =>
+    el("div", { class: "card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode(title)]),
+      el(
+        "table",
+        { class: "table", style: "margin-top:10px" },
+        [
+          el("thead", {}, [
+            el("tr", {}, [
+              el("th", {}, [document.createTextNode("Group")]),
+              el("th", {}, [document.createTextNode("Value")]),
+            ]),
+          ]),
+          el(
+            "tbody",
+            {},
+            pairs.length
+              ? pairs.map(([k, v]) =>
+                  el("tr", {}, [
+                    el("td", {}, [el("strong", {}, [document.createTextNode(String(k))])]),
+                    el("td", {}, [document.createTextNode(valueFmt(v))]),
+                  ])
+                )
+              : [el("tr", {}, [el("td", { colspan: "2" }, [renderEmpty()])])]
+          ),
+        ]
+      ),
+    ]);
+
+  const revenueByCourse = groupSum(invoiceLines, (r) => r.name || "Unknown");
+
+  const revenueByExam = groupSum(invoiceLines, (r) => {
+    const n = (r.name || "").toLowerCase();
+    if (n.includes("x-ray") || n.includes("xray")) return "X-Ray";
+    if (n.includes("mri")) return "MRI";
+    if (n.includes("ct")) return "CT Scan";
+    if (n.includes("ultrasound") || n.includes("usg")) return "Ultrasound";
+    if (n.includes("blood")) return "Blood Test";
+    return "Other";
+  });
+
+  const visitsByOrg = state.hubs
+    .map((h) => [h.name, state.appointments.filter((a) => (a.hubId || "hub_main") === h.id).length])
+    .sort((a, b) => b[1] - a[1]);
+
+  const monthKey = (iso) => {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "Unknown";
+    return d.toLocaleString(undefined, { year: "numeric", month: "short" });
+  };
+  const yearKey = (iso) => {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "Unknown";
+    return `${d.getFullYear()}`;
+  };
+
+  const monthlyRevenue = groupSum(invoiceLines, (r) => monthKey(r.createdAt));
+  const yearlyRevenue = groupSum(invoiceLines, (r) => yearKey(r.createdAt));
+
+  const profitAssumption = 0.6; // 60% cost assumption for prototype
+  const totalRevenue = invoiceLines.reduce((acc, r) => acc + (r.total || 0), 0);
+  const estCost = totalRevenue * profitAssumption;
+  const estProfit = totalRevenue - estCost;
+  const margin = totalRevenue > 0 ? (estProfit / totalRevenue) * 100 : 0;
+
+  const header = el("div", { class: "card soft" }, [
+    el("div", { class: "card-title" }, [document.createTextNode("Analysis Functions")]),
+    el("div", { class: "card-subtitle" }, [document.createTextNode("These are UI placeholders for analytics requested in the SRS (no real BI engine).")]),
+    el("div", { class: "card-actions" }, [
+      el("button", { class: "btn btn-ghost", type: "button", onclick: () => toast("Export", "Prototype: export not implemented.") }, [document.createTextNode("Export (demo)")]),
+    ]),
   ]);
 
-  const reportTable = el("table", { class: "table" }, [
-    el("thead", {}, [
-      el("tr", {}, [
-        el("th", {}, [document.createTextNode("Report")]),
-        el("th", {}, [document.createTextNode("Patient")]),
-        el("th", {}, [document.createTextNode("Status")]),
-        el("th", {}, [document.createTextNode("Created")]),
-        el("th", {}, [document.createTextNode("")]),
+  const functionsList = el("div", { class: "grid cols-2" }, [
+    el("div", { class: "card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("1. Revenue Analysis by Course")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Breakdown by billed service/item name (prototype mapping).")]),
+      el("div", { class: "card-actions" }, [
+        el("button", { class: "btn btn-ghost", type: "button", onclick: () => toast("Analysis", "Showing revenue breakdown by course/service.") }, [document.createTextNode("Run")]),
       ]),
     ]),
-    el("tbody", {}, state.reports.slice().sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map((r) => {
-      const p = findById(state.patients, r.patientId);
-      return el("tr", {}, [
-        el("td", {}, [el("strong", {}, [document.createTextNode(r.title)]), el("div", { class: "help" }, [document.createTextNode(r.id)])]),
-        el("td", {}, [document.createTextNode(p?.name || "Unknown")]),
-        el("td", {}, [statusChip(r.status)]),
-        el("td", {}, [document.createTextNode(formatDT(r.createdAt))]),
-        el("td", {}, [el("button", { class: "btn btn-ghost", type: "button", onclick: () => openVerifyReport(r.id) }, [document.createTextNode("Open")])]),
-      ]);
-    })),
-  ]);
-
-  const insights = el("div", { class: "card soft" }, [
-    el("div", { class: "card-title" }, [document.createTextNode("Insights (Prototype)")]),
-    el("div", { class: "card-subtitle" }, [document.createTextNode("Central monitoring cards that could be expanded with real analytics.")]),
-    el("div", { class: "grid cols-2", style: "margin-top:10px" }, [
-      el("div", { class: "card" }, [
-        el("div", { class: "card-title" }, [document.createTextNode("Due collection")]),
-        el("div", { class: "card-subtitle" }, [document.createTextNode(`Outstanding due: ${money(due)}`)]),
-        el("div", { class: "help" }, [document.createTextNode("Track dues by hub/doctor/patient in the real system.")]),
+    el("div", { class: "card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("2. Revenue Analysis by Examination")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Aggregates revenue by exam category (X-Ray/MRI/CT/etc).")]),
+      el("div", { class: "card-actions" }, [
+        el("button", { class: "btn btn-ghost", type: "button", onclick: () => toast("Analysis", "Showing revenue breakdown by examination category.") }, [document.createTextNode("Run")]),
       ]),
-      el("div", { class: "card" }, [
-        el("div", { class: "card-title" }, [document.createTextNode("Diagnostic monitoring")]),
-        el("div", { class: "card-subtitle" }, [document.createTextNode(`${pending} verification(s) pending`)]),
-        el("div", { class: "help" }, [document.createTextNode("Central can monitor uploads, report status, and delivery times.")]),
+    ]),
+    el("div", { class: "card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("3. Visit Statistics by Organization")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Counts visits/appointments grouped by hub/branch (organization).")]),
+      el("div", { class: "card-actions" }, [
+        el("button", { class: "btn btn-ghost", type: "button", onclick: () => toast("Analysis", "Showing visit statistics by organization/hub.") }, [document.createTextNode("Run")]),
+      ]),
+    ]),
+    el("div", { class: "card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("4. Monthly and Yearly Statistics")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Monthly/yearly revenue totals (based on invoice dates).")]),
+      el("div", { class: "card-actions" }, [
+        el("button", { class: "btn btn-ghost", type: "button", onclick: () => toast("Analysis", "Showing monthly & yearly statistics.") }, [document.createTextNode("Run")]),
+      ]),
+    ]),
+    el("div", { class: "card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("5. Profit Margin Analysis")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Estimates profit margin using a configurable cost assumption (prototype).")]),
+      el("div", { class: "card-actions" }, [
+        el("button", { class: "btn btn-ghost", type: "button", onclick: () => toast("Analysis", `Estimated margin: ${margin.toFixed(1)}% (assumes ${(profitAssumption*100).toFixed(0)}% cost).`) }, [document.createTextNode("Run")]),
       ]),
     ]),
   ]);
 
-  return el("div", { class: "grid" }, [stats, el("div", { class: "card" }, [reportTable]), insights]);
+  const tables = el("div", { class: "grid cols-2" }, [
+    tableFromPairs("Revenue by Course (Top)", revenueByCourse.slice(0, 8)),
+    tableFromPairs("Revenue by Examination (Top)", revenueByExam),
+    tableFromPairs("Visit Statistics by Organization", visitsByOrg, (v) => `${v}`),
+    tableFromPairs("Monthly Revenue", monthlyRevenue.slice(0, 8)),
+    tableFromPairs("Yearly Revenue", yearlyRevenue),
+    el("div", { class: "card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Profit Margin (Estimate)")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Prototype calculation using invoice totals.")]),
+      el("div", { style: "margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;" }, [
+        el("span", { class: "chip" }, [document.createTextNode(`Revenue: ${money(totalRevenue)}`)]),
+        el("span", { class: "chip" }, [document.createTextNode(`Est. Cost (${(profitAssumption * 100).toFixed(0)}%): ${money(estCost)}`)]),
+        el("span", { class: "chip good" }, [document.createTextNode(`Est. Profit: ${money(estProfit)}`)]),
+        el("span", { class: "chip" }, [document.createTextNode(`Margin: ${margin.toFixed(1)}%`)]),
+      ]),
+    ]),
+  ]);
+
+  return el("div", { class: "grid" }, [header, functionsList, tables]);
 }
 
 function viewCentral() {
@@ -783,6 +1404,9 @@ function viewAI() {
     ["Smart Diagnostic Image Detection", "Detect anomalies and auto-flag urgent cases."],
     ["AI-Based Report Analysis", "Summarize findings, compare past reports, and reduce errors."],
     ["Patient Risk Prediction", "Predict complications and prioritize follow-ups."],
+    ["Risk Prediction Analysis", "Score patient risk (e.g., complications/readmission) and prioritize follow-ups."],
+    ["Automatic Proposal Report Generation by Organization", "Auto-generate proposal/summary reports tailored to the organization’s format and KPIs."],
+    ["AI-based Statistical Forecasting", "Forecast patient volume, diagnostics demand, staffing, and revenue trends."],
     ["Voice-Based Appointment System", "Voice input for fast booking and call-center operations."],
     ["AI Chat Support Assistant", "Patient FAQs, appointment status, and test instructions."],
     ["Predictive Revenue & Operational Analytics", "Forecast demand, staffing, and revenue by hub."],
@@ -818,19 +1442,23 @@ const routes = {
   "/diagnostics": viewDiagnostics,
   "/billing": viewBilling,
   "/reports": viewReports,
+  "/analysis-functions": viewAnalysisFunctions,
   "/central": viewCentral,
   "/ai": viewAI,
 };
 
 function currentRoute() {
-  const hash = location.hash || "#/dashboard";
+  const hash =
+    location.hash ||
+    (CONTEXT === "central" ? "#/central" : CONTEXT === "hub" ? "#/dashboard" : "#/dashboard");
   const m = hash.match(/^#(\/[a-z-]+)/i);
   return m ? m[1] : "/dashboard";
 }
 
 function render() {
   const route = currentRoute();
-  const view = routes[route] || routes["/dashboard"];
+  const fallback = CONTEXT === "central" ? "/central" : "/dashboard";
+  const view = routes[route] || routes[fallback] || routes["/dashboard"];
   const node = view();
   $("#view").replaceChildren(node);
   if (window.matchMedia("(max-width: 1020px)").matches) $(".sidebar")?.classList.remove("open");
@@ -846,6 +1474,7 @@ function openCreatePatient() {
       fieldInput("Age", "age", "e.g., 34", "number"),
       fieldSelect("Sex", "sex", ["Female", "Male", "Other"]),
     ]),
+    fieldSelect("Patient type", "patientType", ["General", "Corporate", "Insurance", "VIP"]),
     fieldInput("Address", "address", "City, State"),
     el("div", { class: "help" }, [document.createTextNode("Creates a patient profile and enables appointment booking and history tracking.")]),
   ]);
@@ -863,6 +1492,7 @@ function openCreatePatient() {
         mobile: v.mobile,
         age: Number(v.age || 0),
         sex: v.sex || "Other",
+        patientType: v.patientType || "General",
         address: v.address || "",
         createdAt: new Date().toISOString(),
       });
@@ -1245,6 +1875,306 @@ function openUploadDiagnostic() {
   });
 }
 
+function openUploadDiagnosticEnhanced() {
+  const placeholderText = "No preview loaded. Choose Upload/Scan or load demo image.";
+  let selected = {
+    fileName: "",
+    fileType: "",
+    previewDataUrl: "",
+    scannedText: "",
+    source: "",
+  };
+  let stream = null;
+  let scanTimer = null;
+
+  const stopQr = () => {
+    if (scanTimer) {
+      clearInterval(scanTimer);
+      scanTimer = null;
+    }
+    if (stream) {
+      for (const t of stream.getTracks()) t.stop();
+      stream = null;
+    }
+  };
+
+  const previewBox = (() => {
+    const media = el("div", { class: "preview-media" }, [
+      el("div", { class: "preview-placeholder" }, [document.createTextNode(placeholderText)]),
+    ]);
+
+    const meta = el("div", { class: "help" }, [document.createTextNode("File: —")]);
+
+    const renderPreview = () => {
+      media.replaceChildren();
+
+      if (selected.previewDataUrl) {
+        media.append(el("img", { src: selected.previewDataUrl, alt: "Diagnostic preview" }));
+      } else if (selected.fileType === "application/pdf") {
+        media.append(
+          el("div", { class: "preview-placeholder" }, [
+            document.createTextNode("PDF selected (preview placeholder). You can still save it to the list."),
+          ])
+        );
+      } else if (selected.source === "qr-scan") {
+        media.append(
+          el("div", { class: "preview-placeholder" }, [
+            el("div", { class: "card-title" }, [document.createTextNode("QR scanned text")]),
+            el("div", { class: "card-subtitle" }, [document.createTextNode(selected.scannedText || "—")]),
+          ])
+        );
+      } else {
+        media.append(el("div", { class: "preview-placeholder" }, [document.createTextNode(placeholderText)]));
+      }
+
+      meta.textContent =
+        selected.fileName
+          ? `File: ${selected.fileName} · Type: ${selected.fileType || "—"} · Source: ${selected.source || "—"}`
+          : "File: —";
+    };
+
+    const box = el("div", { class: "preview-box" }, []);
+
+    const clearAll = () => {
+      selected = { fileName: "", fileType: "", previewDataUrl: "", scannedText: "", source: "" };
+      stopQr();
+      const fileInput = $("input[name='__file']", box);
+      const imgScanInput = $("input[name='__imgscan']", box);
+      const pdfScanInput = $("input[name='__pdfscan']", box);
+      if (fileInput) fileInput.value = "";
+      if (imgScanInput) imgScanInput.value = "";
+      if (pdfScanInput) pdfScanInput.value = "";
+      const qrWrap = $("#diagQrWrap2", box);
+      if (qrWrap) qrWrap.style.display = "none";
+      renderPreview();
+    };
+
+    const demoBtn = el(
+      "button",
+      {
+        class: "btn",
+        type: "button",
+        onclick: () => {
+          const canvas = document.createElement("canvas");
+          canvas.width = 960;
+          canvas.height = 600;
+          const ctx = canvas.getContext("2d");
+          const g = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+          g.addColorStop(0, "rgba(110,231,255,.35)");
+          g.addColorStop(1, "rgba(139,92,246,.35)");
+          ctx.fillStyle = g;
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.fillStyle = "rgba(255,255,255,.92)";
+          ctx.font = "700 32px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+          ctx.fillText("Demo Diagnostic Preview", 36, 76);
+          ctx.fillStyle = "rgba(255,255,255,.70)";
+          ctx.font = "500 18px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+          ctx.fillText("Prototype placeholder image (not real medical data)", 36, 112);
+          ctx.strokeStyle = "rgba(255,255,255,.25)";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(36, 150, canvas.width - 72, canvas.height - 210);
+          const dataUrl = canvas.toDataURL("image/png");
+
+          selected.fileName = `demo_scan_${Date.now()}.png`;
+          selected.fileType = "image/png";
+          selected.previewDataUrl = dataUrl;
+          selected.scannedText = "";
+          selected.source = "demo";
+          renderPreview();
+          toast("Loaded", "Demo image loaded.");
+        },
+      },
+      [document.createTextNode("Load demo image")]
+    );
+
+    const clearBtn = el(
+      "button",
+      { class: "btn btn-ghost", type: "button", onclick: () => { clearAll(); toast("Cleared", "Preview cleared."); } },
+      [document.createTextNode("Clear")]
+    );
+
+    const qrBtn = el(
+      "button",
+      {
+        class: "btn btn-ghost",
+        type: "button",
+        onclick: async () => {
+          try {
+            if (!("mediaDevices" in navigator) || !navigator.mediaDevices.getUserMedia) {
+              toast("Not supported", "Camera access is not available in this browser.");
+              return;
+            }
+            if (!("BarcodeDetector" in window)) {
+              toast("Not supported", "QR scanning requires BarcodeDetector (Chrome/Edge).");
+              return;
+            }
+
+            stopQr();
+            const detector = new BarcodeDetector({ formats: ["qr_code"] });
+            stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+            const video = $("#diagQrVideo2", box);
+            video.srcObject = stream;
+            await video.play();
+            $("#diagQrWrap2", box).style.display = "";
+
+            scanTimer = setInterval(async () => {
+              try {
+                const barcodes = await detector.detect(video);
+                if (barcodes?.length) {
+                  const raw = barcodes[0].rawValue || "";
+                  selected.scannedText = raw;
+                  selected.source = "qr-scan";
+                  selected.fileName = `qr_${Date.now()}.txt`;
+                  selected.fileType = "text/qr";
+                  selected.previewDataUrl = "";
+                  renderPreview();
+                  toast("QR detected", raw.slice(0, 80));
+                  $("#diagQrWrap2", box).style.display = "none";
+                  stopQr();
+                }
+              } catch {
+                // ignore transient detect errors
+              }
+            }, 350);
+          } catch (e) {
+            stopQr();
+            toast("QR scan failed", e?.message || "Unable to start camera.");
+          }
+        },
+      },
+      [document.createTextNode("QR scan")]
+    );
+
+    const stopBtn = el(
+      "button",
+      {
+        class: "btn btn-ghost",
+        type: "button",
+        onclick: () => {
+          stopQr();
+          const qrWrap = $("#diagQrWrap2", box);
+          if (qrWrap) qrWrap.style.display = "none";
+          toast("Stopped", "QR scanning stopped.");
+        },
+      },
+      [document.createTextNode("Stop scan")]
+    );
+
+    const onPickFile = async (file, source) => {
+      if (!file) return;
+      stopQr();
+      selected.source = source;
+      selected.fileName = file.name || `upload_${Date.now()}`;
+      selected.fileType = file.type || "application/octet-stream";
+      selected.scannedText = "";
+      selected.previewDataUrl = "";
+
+      if (selected.fileType.startsWith("image/")) {
+        selected.previewDataUrl = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ""));
+          reader.onerror = () => resolve("");
+          reader.readAsDataURL(file);
+        });
+      }
+
+      renderPreview();
+      toast("Loaded", selected.fileName);
+    };
+
+    const fileInput = el("input", { name: "__file", type: "file", accept: "image/*,application/pdf", style: "display:none" });
+    const imgScanInput = el("input", { name: "__imgscan", type: "file", accept: "image/*", capture: "environment", style: "display:none" });
+    const pdfScanInput = el("input", { name: "__pdfscan", type: "file", accept: "application/pdf", style: "display:none" });
+
+    fileInput.addEventListener("change", (e) => onPickFile(e.target.files?.[0], "upload"));
+    imgScanInput.addEventListener("change", (e) => onPickFile(e.target.files?.[0], "image-scan"));
+    pdfScanInput.addEventListener("change", (e) => onPickFile(e.target.files?.[0], "pdf-scan"));
+
+    box.replaceChildren(
+      el("div", { class: "preview-head" }, [
+        el("div", {}, [
+          el("div", { class: "preview-title" }, [document.createTextNode("Preview & Scan")]),
+          el("div", { class: "preview-sub" }, [document.createTextNode("Upload/scan then save to the list.")]),
+        ]),
+        el("div", { class: "preview-controls" }, [demoBtn, clearBtn]),
+      ]),
+      el("div", { class: "preview-body" }, [
+        media,
+        el("div", { class: "preview-controls" }, [
+          el("button", { class: "btn btn-ghost", type: "button", onclick: () => fileInput.click() }, [document.createTextNode("Upload file")]),
+          el("button", { class: "btn btn-ghost", type: "button", onclick: () => imgScanInput.click() }, [document.createTextNode("Image scan")]),
+          el("button", { class: "btn btn-ghost", type: "button", onclick: () => pdfScanInput.click() }, [document.createTextNode("PDF scan")]),
+          qrBtn,
+          stopBtn,
+        ]),
+        fileInput,
+        imgScanInput,
+        pdfScanInput,
+        el("div", { id: "diagQrWrap2", style: "display:none" }, [
+          el("div", { class: "help" }, [document.createTextNode("Point the camera at a QR code to auto-fill.")]),
+          el("video", { id: "diagQrVideo2", playsinline: "true", muted: "true", class: "preview-media", style: "aspect-ratio:16/10" }),
+        ]),
+        meta,
+      ])
+    );
+
+    clearAll(); // ensure clear image load on open
+    return box;
+  })();
+
+  const body = el("div", { class: "form" }, [
+    el("div", { class: "row" }, [
+      fieldSelect("Patient", "patientId", state.patients.map((p) => ({ value: p.id, label: `${p.name} (${p.mobile})` }))),
+      fieldSelect(
+        "Hub/Branch",
+        "hubId",
+        (state.hubs || []).map((h) => ({ value: h.id, label: `${h.name}${h.active ? "" : " (inactive)"}` })),
+        state.hubs?.[0]?.id || ""
+      ),
+    ]),
+    el("div", { class: "row" }, [
+      fieldSelect("Test type", "testType", ["X-Ray", "MRI", "CT Scan", "Ultrasound", "Blood Test"]),
+      fieldInput("Body part", "bodyPart", "e.g., Chest"),
+    ]),
+    previewBox,
+    fieldInput("File name", "fileName", "Optional override (otherwise uses selected file/scan name)"),
+    fieldTextarea("Note", "note", "Optional"),
+    el("div", { class: "help" }, [document.createTextNode("Prototype: image previews stored as data URL. PDFs stored as metadata only.")]),
+  ]);
+
+  openModal({
+    title: "Upload / Scan Diagnostic",
+    bodyNode: body,
+    primaryText: "Save",
+    onPrimary: () => {
+      const v = readForm(body);
+      if (!v.patientId) return toast("Missing fields", "Select a patient.");
+
+      const fileName = (v.fileName || selected.fileName || "demo_image.png").trim();
+      state.diagnostics.unshift({
+        id: uid("dia"),
+        patientId: v.patientId,
+        hubId: v.hubId || "",
+        testType: v.testType || "X-Ray",
+        bodyPart: v.bodyPart || "â€”",
+        status: "Uploaded",
+        fileName,
+        fileType: selected.fileType || "",
+        previewDataUrl: selected.previewDataUrl || "",
+        scannedText: selected.scannedText || "",
+        source: selected.source || "manual",
+        note: v.note || "",
+        createdAt: new Date().toISOString(),
+      });
+      saveState(state);
+      stopQr();
+      toast("Saved", "Diagnostic saved to list.");
+      render();
+    },
+    wide: true,
+  });
+}
+
 function openDiagnosticViewer(diagnosticId) {
   const d = findById(state.diagnostics, diagnosticId);
   if (!d) return toast("Not found", "Diagnostic record not found.");
@@ -1272,6 +2202,53 @@ function openDiagnosticViewer(diagnosticId) {
   ]);
 
   openModal({ title: "Diagnostic Viewer", bodyNode: body, primaryText: "Close", onPrimary: () => {} , wide: true});
+}
+
+function openDiagnosticViewerEnhanced(diagnosticId) {
+  const d = findById(state.diagnostics, diagnosticId);
+  if (!d) return toast("Not found", "Diagnostic record not found.");
+  const p = findById(state.patients, d.patientId);
+  const hub = findById(state.hubs || [], d.hubId);
+
+  const preview = el("div", { class: "preview-media" }, [
+    d.previewDataUrl
+      ? el("img", { src: d.previewDataUrl, alt: "Diagnostic preview" })
+      : el("div", { class: "preview-placeholder" }, [
+          document.createTextNode(d.fileType === "application/pdf" ? "PDF stored (no inline preview in prototype)." : "No image preview stored."),
+        ]),
+  ]);
+
+  const metaChips = el("div", { style: "margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;" }, [
+    el("span", { class: "chip" }, [document.createTextNode(`Hub: ${hub?.name || d.hubId || "—"}`)]),
+    el("span", { class: "chip" }, [document.createTextNode(`Type: ${d.testType || "—"}`)]),
+    el("span", { class: "chip" }, [document.createTextNode(`Body: ${d.bodyPart || "—"}`)]),
+    el("span", { class: "chip" }, [document.createTextNode(`Source: ${d.source || "—"}`)]),
+  ]);
+
+  const body = el("div", { class: "grid" }, [
+    el("div", { class: "card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Viewer")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Preview image/scan details (prototype).")]),
+      el("div", { style: "margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;" }, [
+        el("div", { class: "chip" }, [document.createTextNode(`Patient: ${p?.name || "Unknown"} · ${p?.mobile || ""}`)]),
+        el("div", { class: "chip" }, [document.createTextNode(`File: ${d.fileName || "—"}`)]),
+      ]),
+      metaChips,
+      el("div", { style: "margin-top:12px" }, [
+        el("div", { class: "help" }, [document.createTextNode("Preview")]),
+        preview,
+        d.scannedText ? el("div", { class: "help", style: "margin-top:10px" }, [document.createTextNode(`QR: ${d.scannedText}`)]) : el("div", {}),
+        el("div", { class: "help", style: "margin-top:10px" }, [document.createTextNode("Note")]),
+        el("div", { class: "card-subtitle" }, [document.createTextNode(d.note || "No note.")]),
+      ]),
+      el("div", { class: "card-actions" }, [
+        el("button", { class: "btn btn-ghost", type: "button", onclick: () => toast("Viewer", "In a real system, image bytes would load here with pan/zoom.") }, [document.createTextNode("Pan/zoom demo")]),
+        el("button", { class: "btn", type: "button", onclick: () => { $("#modal").close(); openCreateReport(p?.id); } }, [document.createTextNode("Create report")]),
+      ]),
+    ]),
+  ]);
+
+  openModal({ title: "Diagnostic Viewer", bodyNode: body, primaryText: "Close", onPrimary: () => {}, wide: true });
 }
 
 function openCreateReport(prefPatientId = "") {
@@ -1539,7 +2516,7 @@ function wireQuickActions() {
       quickBtn("Register patient", "Creates a new patient profile.", () => openCreatePatient()),
       quickBtn("Book appointment", "Online/offline booking & token queue.", () => openBookAppointment()),
       quickBtn("Create prescription", "Doctor panel + print view.", () => openCreatePrescription()),
-      quickBtn("Upload diagnostic", "Imaging metadata + viewer.", () => openUploadDiagnostic()),
+      quickBtn("Upload diagnostic", "Imaging metadata + viewer.", () => openUploadDiagnosticEnhanced()),
       quickBtn("Create invoice", "Billing + due tracking.", () => openCreateInvoice()),
       quickBtn("Verify report", "Central verification workflow.", () => {
         const r = state.reports[0];
@@ -1581,7 +2558,8 @@ function wireClock() {
 }
 
 function init() {
-  if (!location.hash) location.hash = "#/dashboard";
+  buildNav();
+  if (!location.hash) location.hash = CONTEXT === "central" ? "#/central" : "#/dashboard";
   window.addEventListener("hashchange", render);
   wireGlobalSearch();
   wireReset();
