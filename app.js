@@ -280,6 +280,137 @@ function toXlsHtml(columns, rows, title) {
   return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title></head><body><table border="1"><thead><tr>${th}</tr></thead><tbody>${trs}</tbody></table></body></html>`;
 }
 
+function setupCanvas(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const w = Math.max(1, Math.floor(rect.width * dpr));
+  const h = Math.max(1, Math.floor(rect.height * dpr));
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+  }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return ctx;
+}
+
+function drawLineChart(canvas, labels, values, color = "rgba(110,231,255,.9)") {
+  const ctx = setupCanvas(canvas);
+  const w = canvas.getBoundingClientRect().width;
+  const h = canvas.getBoundingClientRect().height;
+
+  ctx.clearRect(0, 0, w, h);
+
+  const pad = 14;
+  const x0 = pad;
+  const y0 = pad;
+  const x1 = w - pad;
+  const y1 = h - pad - 18;
+
+  const max = Math.max(1, ...values);
+  const min = Math.min(0, ...values);
+  const range = Math.max(1, max - min);
+
+  // grid
+  ctx.strokeStyle = "rgba(255,255,255,.10)";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = y0 + ((y1 - y0) * i) / 4;
+    ctx.beginPath();
+    ctx.moveTo(x0, y);
+    ctx.lineTo(x1, y);
+    ctx.stroke();
+  }
+
+  const n = values.length || 1;
+  const px = (i) => x0 + (n === 1 ? 0 : ((x1 - x0) * i) / (n - 1));
+  const py = (v) => y1 - ((v - min) * (y1 - y0)) / range;
+
+  // area
+  ctx.beginPath();
+  ctx.moveTo(px(0), py(values[0] || 0));
+  for (let i = 1; i < n; i++) ctx.lineTo(px(i), py(values[i] || 0));
+  ctx.lineTo(px(n - 1), y1);
+  ctx.lineTo(px(0), y1);
+  ctx.closePath();
+  ctx.fillStyle = color.replace("rgba(", "rgba(").replace(/,\s*[\d.]+\)$/, ",.10)");
+  ctx.fill();
+
+  // line
+  ctx.beginPath();
+  ctx.moveTo(px(0), py(values[0] || 0));
+  for (let i = 1; i < n; i++) ctx.lineTo(px(i), py(values[i] || 0));
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // dots
+  ctx.fillStyle = color;
+  for (let i = 0; i < n; i++) {
+    ctx.beginPath();
+    ctx.arc(px(i), py(values[i] || 0), 3.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // x labels (show first, mid, last)
+  ctx.fillStyle = "rgba(255,255,255,.60)";
+  ctx.font = "12px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  const idx = new Set([0, Math.floor((n - 1) / 2), n - 1]);
+  for (const i of idx) {
+    const t = labels[i] ?? "";
+    const tx = px(i);
+    ctx.textAlign = i === 0 ? "left" : i === n - 1 ? "right" : "center";
+    ctx.fillText(String(t), tx, h - 8);
+  }
+}
+
+function drawBarChart(canvas, labels, values, color = "rgba(139,92,246,.9)") {
+  const ctx = setupCanvas(canvas);
+  const w = canvas.getBoundingClientRect().width;
+  const h = canvas.getBoundingClientRect().height;
+
+  ctx.clearRect(0, 0, w, h);
+
+  const pad = 14;
+  const x0 = pad;
+  const y0 = pad;
+  const x1 = w - pad;
+  const y1 = h - pad - 18;
+
+  const max = Math.max(1, ...values);
+  const n = values.length || 1;
+  const gap = 10;
+  const barW = Math.max(10, Math.floor((x1 - x0 - gap * (n - 1)) / n));
+
+  // baseline
+  ctx.strokeStyle = "rgba(255,255,255,.12)";
+  ctx.beginPath();
+  ctx.moveTo(x0, y1);
+  ctx.lineTo(x1, y1);
+  ctx.stroke();
+
+  for (let i = 0; i < n; i++) {
+    const v = values[i] || 0;
+    const bh = ((y1 - y0) * v) / max;
+    const x = x0 + i * (barW + gap);
+    const y = y1 - bh;
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.9;
+    ctx.fillRect(x, y, barW, bh);
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.fillStyle = "rgba(255,255,255,.60)";
+  ctx.font = "12px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+  const idx = new Set([0, Math.floor((n - 1) / 2), n - 1]);
+  for (const i of idx) {
+    const t = labels[i] ?? "";
+    const x = x0 + i * (barW + gap) + barW / 2;
+    ctx.textAlign = i === 0 ? "left" : i === n - 1 ? "right" : "center";
+    ctx.fillText(String(t), x, h - 8);
+  }
+}
+
 function sumInvoice(inv) {
   return inv.items.reduce((acc, it) => acc + it.qty * it.unit, 0);
 }
@@ -313,6 +444,70 @@ function openModal({ title, bodyNode, primaryText = "Save", onPrimary, wide = fa
 
 function renderEmpty() {
   return document.importNode($("#tpl-empty").content, true);
+}
+
+function ensureLiveOps() {
+  window.__liveOps = window.__liveOps || { timer: null };
+  const enabled = !!state?.notes?.liveOpsEnabled;
+
+  if (enabled && !window.__liveOps.timer) {
+    window.__liveOps.timer = setInterval(() => {
+      try {
+        tickLiveOps();
+      } catch {
+        // ignore
+      }
+    }, 6000);
+  }
+
+  if (!enabled && window.__liveOps.timer) {
+    clearInterval(window.__liveOps.timer);
+    window.__liveOps.timer = null;
+  }
+}
+
+function tickLiveOps() {
+  const now = new Date();
+  const date = todayISO();
+  const time = now.toTimeString().slice(0, 5);
+
+  const patient = state.patients[Math.floor(Math.random() * state.patients.length)];
+  const doctor = state.doctors[Math.floor(Math.random() * state.doctors.length)];
+  const hub = state.hubs[Math.floor(Math.random() * state.hubs.length)];
+
+  const statuses = ["Booked", "Queued", "Completed"];
+  const status = statuses[Math.floor(Math.random() * statuses.length)];
+  const token = Math.max(1, ...state.appointments.filter((a) => a.date === date).map((a) => a.token || 0)) + 1;
+
+  state.appointments.unshift({
+    id: uid("apt"),
+    patientId: patient.id,
+    doctorId: doctor.id,
+    hubId: hub.id,
+    date,
+    time,
+    channel: Math.random() > 0.5 ? "Online" : "Offline",
+    status,
+    token,
+    createdAt: new Date().toISOString(),
+  });
+
+  if (Math.random() > 0.55) {
+    const amount = Math.random() > 0.5 ? 20 : 35;
+    state.invoices.unshift({
+      id: uid("inv"),
+      patientId: patient.id,
+      hubId: hub.id,
+      items: [{ name: amount === 20 ? "Consultation" : "X-Ray Chest", qty: 1, unit: amount }],
+      method: "Cash",
+      paid: Math.random() > 0.3 ? amount : 0,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  saveState(state);
+  const route = (location.hash || "").match(/^#(\/[a-z-]+)/i)?.[1] || "/dashboard";
+  if (route === "/dashboard") render();
 }
 
 function viewDashboard() {
@@ -352,7 +547,97 @@ function viewDashboard() {
     alertsCard(),
   ]);
 
-  return el("div", { class: "grid" }, [left, el("div", { class: "split" }, [workflow, quickPanelCard()]), ops]);
+  const liveCard = el("div", { class: "card soft" }, [
+    el("div", { class: "card-title" }, [document.createTextNode("Live Ops (Prototype)")]),
+    el("div", { class: "card-subtitle" }, [document.createTextNode("Simulate live updates so charts and stats change.")]),
+    el("div", { style: "margin-top:10px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;" }, [
+      el("label", { class: "chip", style: "cursor:pointer" }, [
+        el("input", {
+          type: "checkbox",
+          style: "margin-right:8px; transform: translateY(1px)",
+          checked: state.notes?.liveOpsEnabled ? "" : null,
+          onchange: (e) => {
+            state.notes = state.notes || {};
+            state.notes.liveOpsEnabled = !!e.target.checked;
+            saveState(state);
+            ensureLiveOps();
+            toast("Live Ops", state.notes.liveOpsEnabled ? "Enabled" : "Disabled");
+          },
+        }),
+        document.createTextNode("Enable live data"),
+      ]),
+      el(
+        "button",
+        {
+          class: "btn btn-ghost",
+          type: "button",
+          onclick: () => {
+            tickLiveOps();
+            toast("Live event", "Generated one demo event.");
+          },
+        },
+        [document.createTextNode("Generate event")]
+      ),
+      el("span", { class: "help" }, [document.createTextNode("Updates every ~6s when enabled.")]),
+    ]),
+  ]);
+
+  const chartRevenue = (() => {
+    const byDay = new Map();
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      byDay.set(key, 0);
+    }
+    for (const inv of state.invoices) {
+      const key = (inv.createdAt || "").slice(0, 10);
+      if (!byDay.has(key)) continue;
+      byDay.set(key, byDay.get(key) + sumInvoice(inv));
+    }
+    const labels = [...byDay.keys()].map((k) => k.slice(5));
+    const values = [...byDay.values()].map((v) => Math.round(v));
+
+    const canvas = el("canvas", { class: "chart" });
+    requestAnimationFrame(() => drawLineChart(canvas, labels, values, "rgba(110,231,255,.92)"));
+
+    return el("div", { class: "card chart-card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Revenue Trend (Last 7 days)")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Billed amount from invoices (demo data).")]),
+      el("div", { class: "chart-wrap" }, [canvas]),
+      el("div", { class: "legend" }, [
+        el("span", { class: "legend-item" }, [
+          el("span", { class: "swatch", style: "background: rgba(110,231,255,.92)" }),
+          document.createTextNode("Revenue"),
+        ]),
+      ]),
+    ]);
+  })();
+
+  const chartAppts = (() => {
+    const labels = ["Queued", "Booked", "Completed", "Cancelled"];
+    const values = labels.map((s) => apptsToday.filter((a) => a.status === s).length);
+    const canvas = el("canvas", { class: "chart" });
+    requestAnimationFrame(() => drawBarChart(canvas, ["Q", "B", "C", "X"], values, "rgba(139,92,246,.92)"));
+
+    return el("div", { class: "card chart-card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Appointments Today")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Status breakdown for today (demo).")]),
+      el("div", { class: "chart-wrap" }, [canvas]),
+      el("div", { class: "legend" }, values.map((v, i) =>
+        el("span", { class: "legend-item" }, [
+          el("span", { class: "swatch", style: "background: rgba(139,92,246,.92)" }),
+          document.createTextNode(`${labels[i]}: ${v}`),
+        ])
+      )),
+    ]);
+  })();
+
+  const charts = el("div", { class: "grid cols-2" }, [chartRevenue, chartAppts]);
+
+  ensureLiveOps();
+
+  return el("div", { class: "grid" }, [left, el("div", { class: "split" }, [workflow, quickPanelCard()]), liveCard, charts, ops]);
 }
 
 function statCard(title, value, subtitle) {
