@@ -92,6 +92,15 @@ Saved diagnostics store (demo):
 
 - `fileName`, `fileType`, optional `previewDataUrl` (images), optional `scannedText` (QR), `source`, `hubId`
 
+### Diagnostic Investigations Lifecycle (Ordering → Delivery)
+
+In **Diagnostics → Investigation lifecycle**:
+
+- Order tests by department (Pathology/Lab, Radiology/Imaging, Cardiology, Special Diagnostics)
+- Track the lifecycle stages:
+  - Ordered → Collected → Processing → Report Draft → Approved → Delivered
+- Add report summary + remarks, then advance status using **Next step**
+
 ## Dashboard: Charts + “Live” Demo Data
 
 - Dashboard includes simple charts (canvas) for revenue trend and appointment status distribution.
@@ -103,3 +112,15 @@ Saved diagnostics store (demo):
 - Use **Reset demo data** in the sidebar to restore the default seed.
 - QR scanning requires `BarcodeDetector` + camera permissions (typically Chrome/Edge).
 
+## Accounting & Billing Suite (Advanced)
+
+In **Billing → Accounting suite**:
+
+- Service billing + itemized invoices
+- Discounts (percent/flat/benefit)
+- Due tracking per patient + reminder notifications (demo)
+- Employee benefit / insurance payer tracking
+- Cash advance + deposit ledger (per branch)
+- Expense entry + petty cash (per branch)
+- Daily closing report (cash register reconciliation)
+- Bank & mobile banking reconciliation entries

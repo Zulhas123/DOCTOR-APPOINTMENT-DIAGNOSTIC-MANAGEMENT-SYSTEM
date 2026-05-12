@@ -136,6 +136,25 @@ function loadState() {
         createdAt: new Date().toISOString(),
       },
     ],
+    investigations: [
+      {
+        id: "invst_1",
+        patientId: "pat_2",
+        doctorId: "doc_2",
+        hubId: "hub_main",
+        category: "Pathology / Laboratory",
+        testName: "Complete Blood Count (CBC)",
+        priority: "Routine",
+        status: "Ordered",
+        orderedAt: new Date().toISOString(),
+        collectedAt: "",
+        processedAt: "",
+        approvedAt: "",
+        deliveredAt: "",
+        reportSummary: "",
+        remarks: "",
+      },
+    ],
     notes: {
       systemText: normalizeBullets(
         `The Doctor Appointment & Diagnostic Management System is designed to simplify patient management, appointment processing, diagnostics, billing, reporting, and centralized healthcare operations.\n\nCore modules:\n• Patient management\n• Doctor appointment module\n• Prescription management (Bangla & English)\n• Diagnostic & imaging management\n• Accounting & billing\n• Reporting\n\nGeneral work order flow:\n1. Patient Registration\n2. Appointment Booking\n3. Doctor Assignment\n4. Preliminary Prescription Entry\n5. Doctor Consultation\n6. Diagnostic Test Assignment\n7. Billing & Collection\n8. Diagnostic Report Upload\n9. Report Verification\n10. Final Report Delivery`
@@ -152,6 +171,38 @@ function saveState(state) {
 }
 
 const state = loadState();
+state.notes = state.notes || {};
+state.investigations = state.investigations || [];
+state.expenses = state.expenses || [];
+state.cashLedger = state.cashLedger || [];
+state.reconciliations = state.reconciliations || [];
+state.reminders = state.reminders || [];
+state.paymentMethods = state.paymentMethods || [
+  "Cash",
+  "Card",
+  "Bank Transfer",
+  "bKash",
+  "Nagad",
+  "Rocket",
+];
+// Backfill missing fields for older demo states.
+for (const inv of state.investigations) {
+  inv.priority = inv.priority || "Routine";
+  inv.status = inv.status || "Ordered";
+  inv.orderedAt = inv.orderedAt || inv.createdAt || new Date().toISOString();
+  inv.collectedAt = inv.collectedAt || "";
+  inv.processedAt = inv.processedAt || "";
+  inv.approvedAt = inv.approvedAt || "";
+  inv.deliveredAt = inv.deliveredAt || "";
+  inv.reportSummary = inv.reportSummary || "";
+  inv.remarks = inv.remarks || "";
+}
+for (const inv of state.invoices || []) {
+  inv.method = inv.method || "Cash";
+  inv.discount = inv.discount || { type: "none", value: 0, reason: "" };
+  inv.payer = inv.payer || { type: "Self", organization: "" }; // Self | Employee Benefit | Insurance
+  inv.hubId = inv.hubId || "";
+}
 
 function $(sel, root = document) {
   return root.querySelector(sel);
@@ -413,6 +464,24 @@ function drawBarChart(canvas, labels, values, color = "rgba(139,92,246,.9)") {
 
 function sumInvoice(inv) {
   return inv.items.reduce((acc, it) => acc + it.qty * it.unit, 0);
+}
+
+function invoiceDiscountAmount(inv) {
+  const gross = sumInvoice(inv);
+  const d = inv.discount || { type: "none", value: 0 };
+  if (!d || d.type === "none") return 0;
+  const v = Number(d.value || 0);
+  if (d.type === "percent") return Math.max(0, Math.min(gross, (gross * v) / 100));
+  if (d.type === "flat") return Math.max(0, Math.min(gross, v));
+  return 0;
+}
+
+function invoiceNet(inv) {
+  return Math.max(0, sumInvoice(inv) - invoiceDiscountAmount(inv));
+}
+
+function invoiceDue(inv) {
+  return Math.max(0, invoiceNet(inv) - Number(inv.paid || 0));
 }
 
 function findById(list, id) {
@@ -937,6 +1006,7 @@ function viewDiagnostics() {
     el("div", { class: "card-actions" }, [
       el("button", { class: "btn", type: "button", onclick: () => openUploadDiagnosticEnhanced() }, [document.createTextNode("Upload image")]),
       el("button", { class: "btn btn-ghost", type: "button", onclick: () => openCreateReport() }, [document.createTextNode("Create report")]),
+      el("button", { class: "btn btn-ghost", type: "button", onclick: () => openInvestigationLifecycle() }, [document.createTextNode("Investigation lifecycle")]),
     ]),
   ]);
 
@@ -1000,6 +1070,285 @@ function reportsMiniPanel() {
   ]);
 }
 
+function openInvestigationLifecycle() {
+  const catalog = {
+    "Pathology / Laboratory": [
+      "Complete Blood Count (CBC)",
+      "Blood Glucose (Fasting)",
+      "Blood Glucose (PP)",
+      "Blood Glucose (Random)",
+      "Lipid Profile",
+      "Liver Function Tests (LFT)",
+      "Kidney Function Tests (KFT)",
+      "Urine Routine & Culture",
+      "Thyroid Function Tests",
+      "HbA1c",
+      "ESR",
+      "CRP",
+    ],
+    "Radiology & Imaging": [
+      "X-Ray (Digital/Analog) Upload",
+      "Ultrasound Report & Images",
+      "CT Scan Report Upload",
+      "MRI Report Upload",
+      "DICOM Image Viewer (Optional)",
+      "Radiologist Remarks Entry",
+    ],
+    Cardiology: [
+      "ECG Report Upload",
+      "Echocardiography Report",
+      "Holter Monitor Report",
+      "TMT / Stress Test Report",
+    ],
+    "Special Diagnostics": [
+      "Endoscopy Reports",
+      "Biopsy / Histopathology",
+      "Microbiology Culture Reports",
+      "Allergy Testing Reports",
+    ],
+  };
+
+  const statuses = ["Ordered", "Collected", "Processing", "Report Draft", "Approved", "Delivered"];
+
+  const nextStatus = (s) => {
+    const i = statuses.indexOf(s);
+    return i >= 0 && i < statuses.length - 1 ? statuses[i + 1] : s;
+  };
+
+  const stampFor = (status) => {
+    if (status === "Collected") return "collectedAt";
+    if (status === "Processing") return "processedAt";
+    if (status === "Approved") return "approvedAt";
+    if (status === "Delivered") return "deliveredAt";
+    return "";
+  };
+
+  const uniquePatients = state.patients.map((p) => ({ value: p.id, label: `${p.name} (${p.mobile})` }));
+  const uniqueDoctors = state.doctors.map((d) => ({ value: d.id, label: `${d.name} — ${d.specialty}` }));
+  const hubOptions = (state.hubs || []).map((h) => ({ value: h.id, label: `${h.name}${h.active ? "" : " (inactive)"}` }));
+
+  const defaultCategory = Object.keys(catalog)[0];
+  const defaultTest = catalog[defaultCategory][0];
+
+  const root = el("div", { class: "grid cols-2" }, []);
+
+  const buildTestSelectOptions = (category, select) => {
+    const tests = catalog[category] || [];
+    select.replaceChildren(...tests.map((t) => el("option", { value: t }, [document.createTextNode(t)])));
+    if (tests.length) select.value = tests[0];
+  };
+
+  const openReportEditor = (invId) => {
+    const inv = state.investigations.find((x) => x.id === invId);
+    if (!inv) return;
+    const body = el("div", { class: "form" }, [
+      fieldTextarea("Report summary", "reportSummary", "Write report summary...", inv.reportSummary || ""),
+      fieldTextarea("Remarks", "remarks", "Radiologist/Pathologist remarks...", inv.remarks || ""),
+      fieldSelect("Status", "status", statuses, inv.status),
+    ]);
+    openModal({
+      title: "Report Generation / Approval",
+      bodyNode: body,
+      primaryText: "Save",
+      onPrimary: () => {
+        const v = readForm(body);
+        inv.reportSummary = v.reportSummary || "";
+        inv.remarks = v.remarks || "";
+        inv.status = v.status || inv.status;
+        const stamp = stampFor(inv.status);
+        if (stamp && !inv[stamp]) inv[stamp] = new Date().toISOString();
+        saveState(state);
+        toast("Saved", "Investigation updated.");
+        renderBoard();
+      },
+      wide: true,
+    });
+  };
+
+  const advance = (invId) => {
+    const inv = state.investigations.find((x) => x.id === invId);
+    if (!inv) return;
+    const n = nextStatus(inv.status);
+    if (n === inv.status) return;
+    inv.status = n;
+    const stamp = stampFor(n);
+    if (stamp) inv[stamp] = new Date().toISOString();
+    saveState(state);
+    toast("Advanced", `Status: ${inv.status}`);
+    renderBoard();
+  };
+
+  const buildOrderCard = () => {
+    const card = el("div", { class: "card soft" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Investigation Ordering")]),
+      el("div", { class: "card-subtitle" }, [
+        document.createTextNode(
+          "Order tests → sample collection → processing → report draft → approval → delivery (prototype)."
+        ),
+      ]),
+    ]);
+
+    const form = el("div", { class: "form", style: "margin-top:10px" }, [
+      fieldSelect("Patient", "patientId", uniquePatients),
+      fieldSelect("Ordering doctor", "doctorId", uniqueDoctors),
+      fieldSelect("Hub/Branch", "hubId", hubOptions, state.notes?.selectedHubId || (hubOptions[0]?.value || "")),
+      fieldSelect("Department", "category", Object.keys(catalog), defaultCategory),
+      (() => {
+        const field = el("div", { class: "field" }, [
+          el("label", {}, [document.createTextNode("Test name")]),
+          el("select", { name: "testName" }, []),
+        ]);
+        const select = $("select", field);
+        buildTestSelectOptions(defaultCategory, select);
+        return field;
+      })(),
+      fieldSelect("Priority", "priority", ["Routine", "Urgent", "STAT"], "Routine"),
+      fieldTextarea("Clinical note", "clinicalNote", "Reason / symptoms / instruction...", ""),
+    ]);
+
+    // Wire dynamic test list
+    const categorySelect = form.querySelector("select[name='category']");
+    const testSelect = form.querySelector("select[name='testName']");
+    categorySelect.addEventListener("change", () => buildTestSelectOptions(categorySelect.value, testSelect));
+
+    const actions = el("div", { class: "card-actions" }, [
+      el(
+        "button",
+        {
+          class: "btn",
+          type: "button",
+          onclick: () => {
+            const v = readForm(form);
+            if (!v.patientId || !v.doctorId) return toast("Missing fields", "Select patient and ordering doctor.");
+            const inv = {
+              id: uid("invst"),
+              patientId: v.patientId,
+              doctorId: v.doctorId,
+              hubId: v.hubId || "",
+              category: v.category || defaultCategory,
+              testName: v.testName || defaultTest,
+              priority: v.priority || "Routine",
+              status: "Ordered",
+              orderedAt: new Date().toISOString(),
+              collectedAt: "",
+              processedAt: "",
+              approvedAt: "",
+              deliveredAt: "",
+              reportSummary: "",
+              remarks: "",
+              clinicalNote: v.clinicalNote || "",
+            };
+            state.investigations.unshift(inv);
+            saveState(state);
+            toast("Ordered", `${inv.testName}`);
+            renderBoard();
+          },
+        },
+        [document.createTextNode("Order test")]
+      ),
+      el(
+        "button",
+        {
+          class: "btn btn-ghost",
+          type: "button",
+          onclick: () => {
+            toast("Tip", "Use the board to move items through collection → processing → approval → delivery.");
+          },
+        },
+        [document.createTextNode("How it works")]
+      ),
+    ]);
+
+    card.append(form, actions);
+
+    const catalogCard = el("div", { class: "card", style: "margin-top:14px" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Test Catalog (Reference)")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Available departments and tests in this prototype UI.")]),
+      el(
+        "div",
+        { class: "grid", style: "margin-top:10px" },
+        Object.entries(catalog).map(([cat, tests]) =>
+          el("div", { class: "callout" }, [
+            el("div", { class: "dot" }),
+            el("div", {}, [
+              el("strong", {}, [document.createTextNode(cat)]),
+              el("div", { class: "sub" }, [document.createTextNode(tests.join(", "))]),
+            ]),
+          ])
+        )
+      ),
+    ]);
+
+    return el("div", { class: "grid" }, [card, catalogCard]);
+  };
+
+  const boardHost = el("div", { class: "grid" }, []);
+
+  const renderBoard = () => {
+    const cols = statuses.map((s) => {
+      const items = state.investigations.filter((i) => i.status === s);
+      const stack = el(
+        "div",
+        { class: "grid" },
+        items.map((i) => {
+          const p = findById(state.patients, i.patientId);
+          const d = findById(state.doctors, i.doctorId);
+          const hub = findById(state.hubs || [], i.hubId);
+          return el("div", { class: "card" }, [
+            el("div", { class: "card-title" }, [document.createTextNode(i.testName)]),
+            el("div", { class: "card-subtitle" }, [
+              document.createTextNode(`${i.category} · ${hub?.name || i.hubId || "—"}`),
+            ]),
+            el("div", { style: "margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;" }, [
+              statusChip(i.status),
+              el("span", { class: i.priority === "STAT" ? "chip bad" : i.priority === "Urgent" ? "chip warn" : "chip" }, [
+                document.createTextNode(i.priority),
+              ]),
+              el("span", { class: "chip" }, [document.createTextNode(`Patient: ${p?.name || "Unknown"}`)]),
+              el("span", { class: "chip" }, [document.createTextNode(`Doctor: ${d?.name || "—"}`)]),
+            ]),
+            i.clinicalNote
+              ? el("div", { class: "help", style: "margin-top:10px" }, [document.createTextNode(`Note: ${i.clinicalNote}`)])
+              : el("div", {}),
+            i.reportSummary
+              ? el("div", { class: "help", style: "margin-top:10px" }, [document.createTextNode(`Report: ${i.reportSummary}`)])
+              : el("div", {}),
+            el("div", { class: "card-actions" }, [
+              el("button", { class: "btn btn-ghost", type: "button", onclick: () => openReportEditor(i.id) }, [document.createTextNode("Report/Approve")]),
+              el("button", { class: "btn", type: "button", onclick: () => advance(i.id), disabled: i.status === "Delivered" ? "" : null }, [document.createTextNode(i.status === "Delivered" ? "Done" : "Next step")]),
+            ]),
+          ]);
+        })
+      );
+
+      return el("div", { class: "card soft" }, [
+        el("div", { class: "card-title" }, [document.createTextNode(s)]),
+        el("div", { class: "card-subtitle" }, [document.createTextNode(`${items.length} item(s)`) ]),
+        el("div", { style: "margin-top:10px" }, [items.length ? stack : renderEmpty()]),
+      ]);
+    });
+
+    boardHost.replaceChildren(
+      el("div", { class: "card soft" }, [
+        el("div", { class: "card-title" }, [document.createTextNode("Investigation Lifecycle Board")]),
+        el("div", { class: "card-subtitle" }, [document.createTextNode("Move investigations through the lifecycle stages.")]),
+      ]),
+      el("div", { class: "grid cols-3" }, cols)
+    );
+  };
+
+  root.replaceChildren(buildOrderCard(), boardHost);
+  renderBoard();
+
+  openModal({
+    title: "Diagnostic Investigations Lifecycle",
+    bodyNode: root,
+    primaryText: "Close",
+    onPrimary: () => {},
+    wide: true,
+  });
+}
+
 function viewBilling() {
   setTitle("Billing", "Invoices, due collection, income/expense (demo)");
   activeNav("/billing");
@@ -1010,6 +1359,7 @@ function viewBilling() {
     el("div", { class: "card-actions" }, [
       el("button", { class: "btn", type: "button", onclick: () => openCreateInvoice() }, [document.createTextNode("New invoice")]),
       el("button", { class: "btn btn-ghost", type: "button", onclick: () => openCollectDue() }, [document.createTextNode("Collect due")]),
+      el("button", { class: "btn btn-ghost", type: "button", onclick: () => openAccountingSuite() }, [document.createTextNode("Accounting suite")]),
     ]),
   ]);
 
@@ -1018,8 +1368,8 @@ function viewBilling() {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .map((inv) => {
       const p = findById(state.patients, inv.patientId);
-      const total = sumInvoice(inv);
-      const due = Math.max(0, total - (inv.paid || 0));
+      const total = invoiceNet(inv);
+      const due = invoiceDue(inv);
       return el("tr", {}, [
         el("td", {}, [el("strong", {}, [document.createTextNode(inv.id)]), el("div", { class: "help" }, [document.createTextNode(formatDT(inv.createdAt))])]),
         el("td", {}, [document.createTextNode(p?.name || "Unknown")]),
@@ -2606,6 +2956,12 @@ function openVerifyReport(reportId) {
 function openCreateInvoice(prefPatientId = "") {
   const body = el("div", { class: "form" }, [
     fieldSelect("Patient", "patientId", state.patients.map((p) => ({ value: p.id, label: `${p.name} (${p.mobile})` })), prefPatientId),
+    fieldSelect(
+      "Hub/Branch",
+      "hubId",
+      (state.hubs || []).map((h) => ({ value: h.id, label: `${h.name}${h.active ? "" : " (inactive)"}` })),
+      state.hubs?.[0]?.id || ""
+    ),
     el("div", { class: "row" }, [
       fieldInput("Item 1", "item1", "Consultation"),
       fieldInput("Amount 1", "amt1", "20", "number", "20"),
@@ -2614,7 +2970,7 @@ function openCreateInvoice(prefPatientId = "") {
       fieldInput("Item 2", "item2", "e.g., X-Ray"),
       fieldInput("Amount 2", "amt2", "e.g., 35", "number", "0"),
     ]),
-    fieldSelect("Payment method", "method", ["Cash", "Card", "Mobile Banking"]),
+    fieldSelect("Payment method", "method", state.paymentMethods || ["Cash", "Card", "Bank Transfer", "bKash", "Nagad", "Rocket"]),
     fieldInput("Paid now", "paid", "0", "number", "0"),
     el("div", { class: "help" }, [document.createTextNode("Prototype: adds up to two items. Extendable to full billing with services, dues, and mobile banking integration.")]),
   ]);
@@ -2633,8 +2989,11 @@ function openCreateInvoice(prefPatientId = "") {
       state.invoices.unshift({
         id: uid("inv"),
         patientId: v.patientId,
+        hubId: v.hubId || "",
         items,
         method: v.method || "Cash",
+        discount: { type: "none", value: 0, reason: "" },
+        payer: { type: "Self", organization: "" },
         paid: Number(v.paid || 0),
         createdAt: new Date().toISOString(),
       });
@@ -2646,12 +3005,12 @@ function openCreateInvoice(prefPatientId = "") {
 }
 
 function openCollectDue() {
-  const dueInvoices = state.invoices.filter((inv) => sumInvoice(inv) > (inv.paid || 0));
+  const dueInvoices = state.invoices.filter((inv) => invoiceDue(inv) > 0);
   const body = el("div", { class: "form" }, [
     fieldSelect("Invoice", "invoiceId", dueInvoices.map((inv) => {
       const p = findById(state.patients, inv.patientId);
-      const total = sumInvoice(inv);
-      const due = Math.max(0, total - (inv.paid || 0));
+      const total = invoiceNet(inv);
+      const due = invoiceDue(inv);
       return { value: inv.id, label: `${inv.id} · ${p?.name || "Unknown"} · Due ${money(due)}` };
     })),
     fieldInput("Collect amount", "collect", "0", "number", "10"),
@@ -2673,12 +3032,716 @@ function openCollectDue() {
   });
 }
 
+function openAccountingSuite() {
+  const serviceCatalog = [
+    { name: "Consultation Fee", unit: 500 },
+    { name: "Procedure Fee", unit: 1500 },
+    { name: "Complete Blood Count (CBC)", unit: 700 },
+    { name: "Blood Glucose (Fasting)", unit: 300 },
+    { name: "Lipid Profile", unit: 1200 },
+    { name: "LFT (Liver Function Tests)", unit: 1400 },
+    { name: "KFT (Kidney Function Tests)", unit: 1400 },
+    { name: "Thyroid Function Tests", unit: 1600 },
+    { name: "HbA1c", unit: 1200 },
+    { name: "CRP", unit: 900 },
+    { name: "X-Ray Chest", unit: 1200 },
+    { name: "Ultrasound (USG)", unit: 2500 },
+    { name: "ECG", unit: 800 },
+    { name: "Echocardiography", unit: 4500 },
+    { name: "CT Scan", unit: 8000 },
+    { name: "MRI", unit: 12000 },
+    { name: "Endoscopy", unit: 9000 },
+  ];
+
+  const hubs = state.hubs || [];
+  const hubOptions = [{ value: "", label: "All hubs" }, ...hubs.map((h) => ({ value: h.id, label: h.name }))];
+  const payMethods = state.paymentMethods || ["Cash", "Card", "Bank Transfer", "bKash", "Nagad", "Rocket"];
+
+  const active = { tab: "billing" };
+
+  const wrapper = el("div", { class: "grid" }, []);
+  const tabBar = el("div", { class: "card soft" }, [
+    el("div", { class: "card-title" }, [document.createTextNode("Accounting & Billing Suite")]),
+    el("div", { class: "card-subtitle" }, [document.createTextNode("Service billing, discounts, dues, expenses, closing, and reconciliation (prototype).")]),
+    el("div", { style: "margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;" }, [
+      tabBtn("billing", "Service Billing"),
+      tabBtn("discounts", "Discounts"),
+      tabBtn("dues", "Dues & Reminders"),
+      tabBtn("benefits", "Employee/Insurance"),
+      tabBtn("cash", "Cash Advance/Deposit"),
+      tabBtn("expenses", "Expenses & Petty Cash"),
+      tabBtn("closing", "Daily Closing"),
+      tabBtn("recon", "Bank/Mobile Reconciliation"),
+    ]),
+  ]);
+
+  const content = el("div", { class: "grid" }, []);
+
+  function tabBtn(id, label) {
+    return el(
+      "button",
+      {
+        class: active.tab === id ? "chip good" : "chip",
+        type: "button",
+        onclick: () => {
+          active.tab = id;
+          renderTab();
+        },
+      },
+      [document.createTextNode(label)]
+    );
+  }
+
+  function exportButtons(title, columns, rows) {
+    return el("div", { class: "card-actions" }, [
+      el(
+        "button",
+        {
+          class: "btn btn-ghost",
+          type: "button",
+          onclick: () => downloadBlob(`${title.replaceAll(" ", "_")}.csv`, "text/csv;charset=utf-8", toCSV(columns, rows)),
+        },
+        [document.createTextNode("Export CSV")]
+      ),
+      el(
+        "button",
+        {
+          class: "btn btn-ghost",
+          type: "button",
+          onclick: () => downloadBlob(`${title.replaceAll(" ", "_")}.xls`, "application/vnd.ms-excel;charset=utf-8", toXlsHtml(columns, rows, title)),
+        },
+        [document.createTextNode("Export Excel")]
+      ),
+      el("button", { class: "btn btn-ghost", type: "button", onclick: () => window.print() }, [document.createTextNode("Export PDF")]),
+    ]);
+  }
+
+  function renderTab() {
+    // refresh active styling
+    tabBar.replaceChildren(
+      tabBar.firstChild,
+      tabBar.childNodes[1],
+      tabBar.childNodes[2]
+    );
+    // rebuild tab buttons row (simpler)
+    tabBar.replaceChildren(
+      el("div", { class: "card-title" }, [document.createTextNode("Accounting & Billing Suite")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Service billing, discounts, dues, expenses, closing, and reconciliation (prototype).")]),
+      el("div", { style: "margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;" }, [
+        tabBtn("billing", "Service Billing"),
+        tabBtn("discounts", "Discounts"),
+        tabBtn("dues", "Dues & Reminders"),
+        tabBtn("benefits", "Employee/Insurance"),
+        tabBtn("cash", "Cash Advance/Deposit"),
+        tabBtn("expenses", "Expenses & Petty Cash"),
+        tabBtn("closing", "Daily Closing"),
+        tabBtn("recon", "Bank/Mobile Reconciliation"),
+      ])
+    );
+
+    if (active.tab === "billing") return renderBilling();
+    if (active.tab === "discounts") return renderDiscounts();
+    if (active.tab === "dues") return renderDues();
+    if (active.tab === "benefits") return renderBenefits();
+    if (active.tab === "cash") return renderCash();
+    if (active.tab === "expenses") return renderExpenses();
+    if (active.tab === "closing") return renderClosing();
+    if (active.tab === "recon") return renderRecon();
+  }
+
+  function renderBilling() {
+    const form = el("div", { class: "card soft" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Service Billing")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Create an itemized invoice (consultation, tests, procedures) with discounts and payment methods.")]),
+    ]);
+
+    const line = (idx) => {
+      const field = el("div", { class: "row" }, [
+        fieldSelect(
+          `Service ${idx}`,
+          `svc_${idx}`,
+          [{ value: "", label: "—" }, ...serviceCatalog.map((s) => ({ value: s.name, label: `${s.name} (৳${s.unit})` }))]
+        ),
+        fieldInput(`Qty ${idx}`, `qty_${idx}`, "1", "number", "1"),
+      ]);
+      return field;
+    };
+
+    const body = el("div", { class: "form", style: "margin-top:10px" }, [
+      fieldSelect("Patient", "patientId", state.patients.map((p) => ({ value: p.id, label: `${p.name} (${p.mobile})` }))),
+      fieldSelect("Hub/Branch", "hubId", hubs.map((h) => ({ value: h.id, label: h.name })), hubs[0]?.id || ""),
+      line(1),
+      line(2),
+      line(3),
+      el("div", { class: "row" }, [
+        fieldSelect("Discount type", "discountType", [{ value: "none", label: "None" }, { value: "percent", label: "Percent (%)" }, { value: "flat", label: "Flat (৳)" }], "none"),
+        fieldInput("Discount value", "discountValue", "0", "number", "0"),
+      ]),
+      fieldInput("Discount reason", "discountReason", "e.g., Employee benefit / promo / flat adjustment"),
+      el("div", { class: "row" }, [
+        fieldSelect("Payer", "payerType", ["Self", "Employee Benefit", "Insurance"], "Self"),
+        fieldInput("Organization / Insurer", "organization", "Optional"),
+      ]),
+      el("div", { class: "row" }, [
+        fieldSelect("Payment method", "method", payMethods, payMethods[0] || "Cash"),
+        fieldInput("Paid now (৳)", "paid", "0", "number", "0"),
+      ]),
+      el("div", { class: "help" }, [document.createTextNode("Bangladesh digital payments supported in the prototype: bKash, Nagad, Rocket, plus bank transfer/card/cash.")]),
+    ]);
+
+    const actions = el("div", { class: "card-actions" }, [
+      el(
+        "button",
+        {
+          class: "btn",
+          type: "button",
+          onclick: () => {
+            const v = readForm(body);
+            if (!v.patientId) return toast("Missing fields", "Select a patient.");
+
+            const items = [];
+            for (const idx of [1, 2, 3]) {
+              const name = (v[`svc_${idx}`] || "").trim();
+              const qty = Number(v[`qty_${idx}`] || 0);
+              if (!name || qty <= 0) continue;
+              const svc = serviceCatalog.find((s) => s.name === name);
+              items.push({ name, qty, unit: svc ? svc.unit : 0 });
+            }
+            if (!items.length) return toast("Missing items", "Select at least one service/test.");
+
+            const inv = {
+              id: uid("inv"),
+              patientId: v.patientId,
+              hubId: v.hubId || "",
+              items,
+              discount: { type: v.discountType || "none", value: Number(v.discountValue || 0), reason: v.discountReason || "" },
+              payer: { type: v.payerType || "Self", organization: v.organization || "" },
+              method: v.method || "Cash",
+              paid: Number(v.paid || 0),
+              createdAt: new Date().toISOString(),
+            };
+            state.invoices.unshift(inv);
+            saveState(state);
+            toast("Invoice created", `Net ${money(invoiceNet(inv))} · Due ${money(invoiceDue(inv))}`);
+            render(); // refresh main screen tables
+            renderTab(); // refresh suite
+          },
+        },
+        [document.createTextNode("Create invoice")]
+      ),
+    ]);
+
+    const recent = state.invoices
+      .slice(0, 10)
+      .map((inv) => {
+        const p = findById(state.patients, inv.patientId);
+        return {
+          id: inv.id,
+          patient: p?.name || "Unknown",
+          hub: findById(hubs, inv.hubId)?.name || inv.hubId || "—",
+          net: money(invoiceNet(inv)),
+          due: money(invoiceDue(inv)),
+          payer: inv.payer?.type || "Self",
+          method: inv.method || "—",
+          createdAt: formatDT(inv.createdAt),
+        };
+      });
+    const cols = [
+      { key: "id", label: "Invoice" },
+      { key: "patient", label: "Patient" },
+      { key: "hub", label: "Hub" },
+      { key: "net", label: "Net" },
+      { key: "due", label: "Due" },
+      { key: "payer", label: "Payer" },
+      { key: "method", label: "Method" },
+      { key: "createdAt", label: "Created" },
+    ];
+
+    const table = el("table", { class: "table", style: "margin-top:10px" }, [
+      el("thead", {}, [el("tr", {}, cols.map((c) => el("th", {}, [document.createTextNode(c.label)])))]),
+      el("tbody", {}, recent.map((r) => el("tr", {}, cols.map((c) => el("td", {}, [document.createTextNode(String(r[c.key]))]))))),
+    ]);
+
+    content.replaceChildren(form, body, actions, el("div", { class: "card" }, [el("div", { class: "card-title" }, [document.createTextNode("Recent Invoices")]), exportButtons("recent_invoices", cols, recent), table]));
+  }
+
+  function renderDiscounts() {
+    const card = el("div", { class: "card soft" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Discount Management")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Percentage, flat-rate, and employee benefit discounts (prototype).")]),
+    ]);
+
+    const rows = state.invoices
+      .filter((i) => i.discount && i.discount.type !== "none" && Number(i.discount.value || 0) > 0)
+      .slice(0, 20)
+      .map((inv) => {
+        const p = findById(state.patients, inv.patientId);
+        return {
+          invoice: inv.id,
+          patient: p?.name || "Unknown",
+          type: inv.discount.type,
+          value: inv.discount.value,
+          amount: money(invoiceDiscountAmount(inv)),
+          reason: inv.discount.reason || "",
+          net: money(invoiceNet(inv)),
+        };
+      });
+
+    const cols = [
+      { key: "invoice", label: "Invoice" },
+      { key: "patient", label: "Patient" },
+      { key: "type", label: "Type" },
+      { key: "value", label: "Value" },
+      { key: "amount", label: "Amount" },
+      { key: "reason", label: "Reason" },
+      { key: "net", label: "Net" },
+    ];
+
+    const table = el("table", { class: "table", style: "margin-top:10px" }, [
+      el("thead", {}, [el("tr", {}, cols.map((c) => el("th", {}, [document.createTextNode(c.label)])))]),
+      el("tbody", {}, rows.length ? rows.map((r) => el("tr", {}, cols.map((c) => el("td", {}, [document.createTextNode(String(r[c.key]))])))) : [el("tr", {}, [el("td", { colspan: `${cols.length}` }, [renderEmpty()])])]),
+    ]);
+
+    content.replaceChildren(card, el("div", { class: "card" }, [exportButtons("discounts", cols, rows), table]));
+  }
+
+  function renderDues() {
+    const card = el("div", { class: "card soft" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Due Balance Tracking + Reminders")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Track due per patient and send reminder notifications (prototype).")]),
+    ]);
+
+    const balances = state.patients
+      .map((p) => {
+        const invs = state.invoices.filter((i) => i.patientId === p.id);
+        const due = invs.reduce((acc, i) => acc + invoiceDue(i), 0);
+        return { patient: p.name, mobile: p.mobile, due: Math.round(due), id: p.id };
+      })
+      .filter((x) => x.due > 0)
+      .sort((a, b) => b.due - a.due);
+
+    const cols = [
+      { key: "patient", label: "Patient" },
+      { key: "mobile", label: "Mobile" },
+      { key: "due", label: "Due (৳)" },
+    ];
+
+    const table = el("table", { class: "table", style: "margin-top:10px" }, [
+      el("thead", {}, [el("tr", {}, cols.map((c) => el("th", {}, [document.createTextNode(c.label)])))]),
+      el("tbody", {}, balances.length ? balances.map((r) => el("tr", {}, [
+        el("td", {}, [el("strong", {}, [document.createTextNode(r.patient)])]),
+        el("td", {}, [document.createTextNode(r.mobile)]),
+        el("td", {}, [document.createTextNode(`৳${r.due}`)]),
+      ])) : [el("tr", {}, [el("td", { colspan: `${cols.length}` }, [renderEmpty()])])]),
+    ]);
+
+    const reminderForm = el("div", { class: "card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Reminder Notification")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Prototype: stores a reminder log and shows a toast.")]),
+      el("div", { class: "form", style: "margin-top:10px" }, [
+        fieldSelect("Patient", "patientId", [{ value: "", label: "—" }, ...state.patients.map((p) => ({ value: p.id, label: `${p.name} (${p.mobile})` }))]),
+        fieldTextarea("Message", "message", "Reminder message...", "Your due balance is pending. Please clear your due at your earliest convenience."),
+      ]),
+    ]);
+
+    const reminderActions = el("div", { class: "card-actions" }, [
+      el("button", {
+        class: "btn",
+        type: "button",
+        onclick: () => {
+          const v = readForm(reminderForm);
+          if (!v.patientId) return toast("Missing fields", "Select a patient for reminder.");
+          const p = findById(state.patients, v.patientId);
+          state.reminders.unshift({ id: uid("rem"), patientId: v.patientId, message: v.message || "", createdAt: new Date().toISOString() });
+          saveState(state);
+          toast("Reminder sent (demo)", `${p?.name || "Patient"}: ${(v.message || "").slice(0, 80)}`);
+          renderTab();
+        },
+      }, [document.createTextNode("Send reminder")]),
+    ]);
+
+    const logRows = state.reminders.slice(0, 12).map((r) => {
+      const p = findById(state.patients, r.patientId);
+      return { patient: p?.name || "Unknown", message: r.message, createdAt: formatDT(r.createdAt) };
+    });
+    const logCols = [
+      { key: "patient", label: "Patient" },
+      { key: "message", label: "Message" },
+      { key: "createdAt", label: "Time" },
+    ];
+    const logTable = el("table", { class: "table", style: "margin-top:10px" }, [
+      el("thead", {}, [el("tr", {}, logCols.map((c) => el("th", {}, [document.createTextNode(c.label)])))]),
+      el("tbody", {}, logRows.length ? logRows.map((r) => el("tr", {}, logCols.map((c) => el("td", {}, [document.createTextNode(String(r[c.key]))])))) : [el("tr", {}, [el("td", { colspan: `${logCols.length}` }, [renderEmpty()])])]),
+    ]);
+
+    content.replaceChildren(card, el("div", { class: "card" }, [exportButtons("due_balances", cols, balances.map((b) => ({ patient: b.patient, mobile: b.mobile, due: b.due }))), table]), reminderForm, reminderActions, el("div", { class: "card" }, [el("div", { class: "card-title" }, [document.createTextNode("Reminder Log")]), logTable]));
+  }
+
+  function renderBenefits() {
+    const card = el("div", { class: "card soft" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Employee Benefit & Insurance Billing")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Track invoices billed to employee benefits or insurers (prototype).")]),
+    ]);
+
+    const rows = state.invoices
+      .filter((i) => (i.payer?.type || "Self") !== "Self")
+      .slice(0, 25)
+      .map((inv) => {
+        const p = findById(state.patients, inv.patientId);
+        return {
+          invoice: inv.id,
+          patient: p?.name || "Unknown",
+          payer: inv.payer?.type || "Self",
+          org: inv.payer?.organization || "",
+          net: money(invoiceNet(inv)),
+          due: money(invoiceDue(inv)),
+          createdAt: formatDT(inv.createdAt),
+        };
+      });
+
+    const cols = [
+      { key: "invoice", label: "Invoice" },
+      { key: "patient", label: "Patient" },
+      { key: "payer", label: "Payer" },
+      { key: "org", label: "Organization/Insurer" },
+      { key: "net", label: "Net" },
+      { key: "due", label: "Due" },
+      { key: "createdAt", label: "Created" },
+    ];
+
+    const table = el("table", { class: "table", style: "margin-top:10px" }, [
+      el("thead", {}, [el("tr", {}, cols.map((c) => el("th", {}, [document.createTextNode(c.label)])))]),
+      el("tbody", {}, rows.length ? rows.map((r) => el("tr", {}, cols.map((c) => el("td", {}, [document.createTextNode(String(r[c.key]))])))) : [el("tr", {}, [el("td", { colspan: `${cols.length}` }, [renderEmpty()])])]),
+    ]);
+
+    content.replaceChildren(card, el("div", { class: "card" }, [exportButtons("benefit_insurance", cols, rows), table]));
+  }
+
+  function renderCash() {
+    const card = el("div", { class: "card soft" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Cash Advance & Deposit Management")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Record advances, deposits, and withdrawals per branch (prototype).")]),
+    ]);
+
+    const form = el("div", { class: "card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("New Cash Entry")]),
+      el("div", { class: "form", style: "margin-top:10px" }, [
+        fieldSelect("Hub/Branch", "hubId", hubs.map((h) => ({ value: h.id, label: h.name })), hubs[0]?.id || ""),
+        el("div", { class: "row" }, [
+          fieldSelect("Type", "type", ["Cash Advance", "Deposit", "Withdraw"], "Deposit"),
+          fieldInput("Amount (৳)", "amount", "0", "number", "0"),
+        ]),
+        el("div", { class: "row" }, [
+          fieldSelect("Method", "method", payMethods, payMethods[0] || "Cash"),
+          fieldInput("Reference", "ref", "Txn/Slip no."),
+        ]),
+        fieldInput("Note", "note", "Optional"),
+      ]),
+    ]);
+
+    const actions = el("div", { class: "card-actions" }, [
+      el("button", {
+        class: "btn",
+        type: "button",
+        onclick: () => {
+          const v = readForm(form);
+          const amt = Number(v.amount || 0);
+          if (!v.hubId || amt <= 0) return toast("Missing fields", "Hub and amount are required.");
+          state.cashLedger.unshift({
+            id: uid("cash"),
+            hubId: v.hubId,
+            type: v.type || "Deposit",
+            amount: amt,
+            method: v.method || "Cash",
+            ref: v.ref || "",
+            note: v.note || "",
+            createdAt: new Date().toISOString(),
+          });
+          saveState(state);
+          toast("Saved", "Cash ledger entry recorded.");
+          renderTab();
+        },
+      }, [document.createTextNode("Save entry")]),
+    ]);
+
+    const rows = state.cashLedger.slice(0, 25).map((e) => ({
+      hub: findById(hubs, e.hubId)?.name || e.hubId,
+      type: e.type,
+      amount: `৳${Math.round(e.amount)}`,
+      method: e.method,
+      ref: e.ref,
+      createdAt: formatDT(e.createdAt),
+    }));
+    const cols = [
+      { key: "hub", label: "Hub" },
+      { key: "type", label: "Type" },
+      { key: "amount", label: "Amount" },
+      { key: "method", label: "Method" },
+      { key: "ref", label: "Ref" },
+      { key: "createdAt", label: "Time" },
+    ];
+    const table = el("table", { class: "table", style: "margin-top:10px" }, [
+      el("thead", {}, [el("tr", {}, cols.map((c) => el("th", {}, [document.createTextNode(c.label)])))]),
+      el("tbody", {}, rows.length ? rows.map((r) => el("tr", {}, cols.map((c) => el("td", {}, [document.createTextNode(String(r[c.key] ?? ""))])))) : [el("tr", {}, [el("td", { colspan: `${cols.length}` }, [renderEmpty()])])]),
+    ]);
+
+    content.replaceChildren(card, form, actions, el("div", { class: "card" }, [exportButtons("cash_ledger", cols, rows), table]));
+  }
+
+  function renderExpenses() {
+    const card = el("div", { class: "card soft" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Expense Entry & Petty Cash (Per Branch)")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Record expenses and track petty cash usage per branch (prototype).")]),
+    ]);
+
+    const categories = ["Utilities", "Supplies", "Maintenance", "Salary/HR", "Transport", "Petty Cash", "Other"];
+
+    const form = el("div", { class: "card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("New Expense")]),
+      el("div", { class: "form", style: "margin-top:10px" }, [
+        fieldSelect("Hub/Branch", "hubId", hubs.map((h) => ({ value: h.id, label: h.name })), hubs[0]?.id || ""),
+        el("div", { class: "row" }, [
+          fieldSelect("Category", "category", categories, "Petty Cash"),
+          fieldInput("Amount (৳)", "amount", "0", "number", "0"),
+        ]),
+        fieldSelect("Payment method", "method", payMethods, payMethods[0] || "Cash"),
+        fieldInput("Note", "note", "Optional"),
+      ]),
+    ]);
+
+    const actions = el("div", { class: "card-actions" }, [
+      el("button", {
+        class: "btn",
+        type: "button",
+        onclick: () => {
+          const v = readForm(form);
+          const amt = Number(v.amount || 0);
+          if (!v.hubId || amt <= 0) return toast("Missing fields", "Hub and amount are required.");
+          state.expenses.unshift({
+            id: uid("exp"),
+            hubId: v.hubId,
+            category: v.category || "Other",
+            amount: amt,
+            method: v.method || "Cash",
+            note: v.note || "",
+            createdAt: new Date().toISOString(),
+          });
+          saveState(state);
+          toast("Saved", "Expense entry recorded.");
+          renderTab();
+        },
+      }, [document.createTextNode("Save expense")]),
+    ]);
+
+    const rows = state.expenses.slice(0, 25).map((e) => ({
+      hub: findById(hubs, e.hubId)?.name || e.hubId,
+      category: e.category,
+      amount: `৳${Math.round(e.amount)}`,
+      method: e.method,
+      note: e.note,
+      createdAt: formatDT(e.createdAt),
+    }));
+    const cols = [
+      { key: "hub", label: "Hub" },
+      { key: "category", label: "Category" },
+      { key: "amount", label: "Amount" },
+      { key: "method", label: "Method" },
+      { key: "note", label: "Note" },
+      { key: "createdAt", label: "Time" },
+    ];
+    const table = el("table", { class: "table", style: "margin-top:10px" }, [
+      el("thead", {}, [el("tr", {}, cols.map((c) => el("th", {}, [document.createTextNode(c.label)])))]),
+      el("tbody", {}, rows.length ? rows.map((r) => el("tr", {}, cols.map((c) => el("td", {}, [document.createTextNode(String(r[c.key] ?? ""))])))) : [el("tr", {}, [el("td", { colspan: `${cols.length}` }, [renderEmpty()])])]),
+    ]);
+
+    content.replaceChildren(card, form, actions, el("div", { class: "card" }, [exportButtons("expenses", cols, rows), table]));
+  }
+
+  function renderClosing() {
+    const card = el("div", { class: "card soft" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Daily Closing Report (Cash Register Reconciliation)")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Summarize cash in/out and reconcile daily register (prototype).")]),
+    ]);
+
+    const form = el("div", { class: "card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Select day + hub")]),
+      el("div", { class: "row", style: "margin-top:10px" }, [
+        fieldInput("Date", "day", "", "date", todayISO()),
+        fieldSelect("Hub/Branch", "hubId", hubOptions, ""),
+      ]),
+    ]);
+
+    const v = readForm(form);
+    const day = v.day || todayISO();
+    const hubId = v.hubId || "";
+
+    const filterHub = (xHubId) => !hubId || xHubId === hubId;
+
+    const cashInFromInvoices = state.invoices
+      .filter((inv) => (inv.createdAt || "").slice(0, 10) === day)
+      .filter((inv) => filterHub(inv.hubId || ""))
+      .filter((inv) => (inv.method || "Cash") === "Cash")
+      .reduce((acc, inv) => acc + Number(inv.paid || 0), 0);
+
+    const cashDeposits = state.cashLedger
+      .filter((e) => (e.createdAt || "").slice(0, 10) === day)
+      .filter((e) => filterHub(e.hubId))
+      .filter((e) => e.type === "Deposit" && (e.method || "Cash") === "Cash")
+      .reduce((acc, e) => acc + Number(e.amount || 0), 0);
+
+    const cashAdvances = state.cashLedger
+      .filter((e) => (e.createdAt || "").slice(0, 10) === day)
+      .filter((e) => filterHub(e.hubId))
+      .filter((e) => e.type === "Cash Advance" && (e.method || "Cash") === "Cash")
+      .reduce((acc, e) => acc + Number(e.amount || 0), 0);
+
+    const cashExpenses = state.expenses
+      .filter((e) => (e.createdAt || "").slice(0, 10) === day)
+      .filter((e) => filterHub(e.hubId))
+      .filter((e) => (e.method || "Cash") === "Cash")
+      .reduce((acc, e) => acc + Number(e.amount || 0), 0);
+
+    const cashNet = cashInFromInvoices + cashDeposits - cashAdvances - cashExpenses;
+
+    const summary = [
+      { item: "Cash collected from invoices", amount: money(cashInFromInvoices) },
+      { item: "Cash deposits", amount: money(cashDeposits) },
+      { item: "Cash advances", amount: money(cashAdvances) },
+      { item: "Cash expenses", amount: money(cashExpenses) },
+      { item: "Expected closing cash (net)", amount: money(cashNet) },
+    ];
+
+    const cols = [
+      { key: "item", label: "Item" },
+      { key: "amount", label: "Amount" },
+    ];
+
+    const table = el("table", { class: "table", style: "margin-top:10px" }, [
+      el("thead", {}, [el("tr", {}, cols.map((c) => el("th", {}, [document.createTextNode(c.label)])))]),
+      el("tbody", {}, summary.map((r) => el("tr", {}, cols.map((c) => el("td", {}, [document.createTextNode(String(r[c.key]))]))))),
+    ]);
+
+    const actions = el("div", { class: "card-actions" }, [
+      el("button", {
+        class: "btn",
+        type: "button",
+        onclick: () => {
+          toast("Closing (demo)", "In a real system this would lock the day and store reconciliation signatures.");
+        },
+      }, [document.createTextNode("Finalize closing (demo)")]),
+    ]);
+
+    // Make form reactive
+    form.addEventListener("change", () => renderTab());
+
+    content.replaceChildren(card, form, el("div", { class: "card" }, [exportButtons(`daily_closing_${day}`, cols, summary), table, actions]));
+  }
+
+  function renderRecon() {
+    const card = el("div", { class: "card soft" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Bank & Mobile Banking Entry Reconciliation")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Log and reconcile bank/mobile entries across branches (prototype).")]),
+    ]);
+
+    const channels = ["Bank", "Mobile Banking"];
+    const mobileMethods = ["bKash", "Nagad", "Rocket"];
+    const bankMethods = ["Bank Transfer", "Card"];
+
+    const invoiceOptions = [{ value: "", label: "— (optional)" }, ...state.invoices.slice(0, 50).map((i) => ({ value: i.id, label: i.id }))];
+
+    const form = el("div", { class: "card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("New Reconciliation Entry")]),
+      el("div", { class: "form", style: "margin-top:10px" }, [
+        fieldSelect("Hub/Branch", "hubId", hubs.map((h) => ({ value: h.id, label: h.name })), hubs[0]?.id || ""),
+        el("div", { class: "row" }, [
+          fieldSelect("Channel", "channel", channels, "Mobile Banking"),
+          fieldInput("Amount (৳)", "amount", "0", "number", "0"),
+        ]),
+        fieldSelect("Method", "method", [...new Set([...mobileMethods, ...bankMethods])]),
+        el("div", { class: "row" }, [
+          fieldInput("Reference", "ref", "Txn / bank slip no."),
+          fieldSelect("Match invoice (optional)", "invoiceId", invoiceOptions),
+        ]),
+        fieldSelect("Status", "status", ["Unmatched", "Matched", "Investigate"], "Unmatched"),
+        fieldInput("Note", "note", "Optional"),
+      ]),
+    ]);
+
+    const actions = el("div", { class: "card-actions" }, [
+      el("button", {
+        class: "btn",
+        type: "button",
+        onclick: () => {
+          const v = readForm(form);
+          const amt = Number(v.amount || 0);
+          if (!v.hubId || amt <= 0 || !v.ref) return toast("Missing fields", "Hub, amount, and reference are required.");
+          state.reconciliations.unshift({
+            id: uid("rec"),
+            hubId: v.hubId,
+            channel: v.channel || "Mobile Banking",
+            method: v.method || "",
+            amount: amt,
+            ref: v.ref || "",
+            invoiceId: v.invoiceId || "",
+            status: v.status || "Unmatched",
+            note: v.note || "",
+            createdAt: new Date().toISOString(),
+          });
+          saveState(state);
+          toast("Saved", "Reconciliation entry recorded.");
+          renderTab();
+        },
+      }, [document.createTextNode("Save entry")]),
+    ]);
+
+    const rows = state.reconciliations.slice(0, 25).map((r) => ({
+      hub: findById(hubs, r.hubId)?.name || r.hubId,
+      channel: r.channel,
+      method: r.method,
+      amount: `৳${Math.round(r.amount)}`,
+      ref: r.ref,
+      invoiceId: r.invoiceId || "",
+      status: r.status,
+      createdAt: formatDT(r.createdAt),
+    }));
+    const cols = [
+      { key: "hub", label: "Hub" },
+      { key: "channel", label: "Channel" },
+      { key: "method", label: "Method" },
+      { key: "amount", label: "Amount" },
+      { key: "ref", label: "Reference" },
+      { key: "invoiceId", label: "Invoice" },
+      { key: "status", label: "Status" },
+      { key: "createdAt", label: "Time" },
+    ];
+    const table = el("table", { class: "table", style: "margin-top:10px" }, [
+      el("thead", {}, [el("tr", {}, cols.map((c) => el("th", {}, [document.createTextNode(c.label)])))]),
+      el("tbody", {}, rows.length ? rows.map((r) => el("tr", {}, cols.map((c) => el("td", {}, [document.createTextNode(String(r[c.key] ?? ""))])))) : [el("tr", {}, [el("td", { colspan: `${cols.length}` }, [renderEmpty()])])]),
+    ]);
+
+    content.replaceChildren(card, form, actions, el("div", { class: "card" }, [exportButtons("reconciliation_entries", cols, rows), table]));
+  }
+
+  wrapper.replaceChildren(tabBar, content);
+  renderTab();
+
+  openModal({
+    title: "Accounting & Billing Suite",
+    bodyNode: wrapper,
+    primaryText: "Close",
+    onPrimary: () => {},
+    wide: true,
+  });
+}
+
 function openInvoiceDetails(invId) {
   const inv = findById(state.invoices, invId);
   if (!inv) return toast("Not found", "Invoice not found.");
   const p = findById(state.patients, inv.patientId);
-  const total = sumInvoice(inv);
-  const due = Math.max(0, total - (inv.paid || 0));
+  const gross = sumInvoice(inv);
+  const discountAmt = invoiceDiscountAmount(inv);
+  const total = invoiceNet(inv);
+  const due = invoiceDue(inv);
 
   const itemsTable = el("table", { class: "table" }, [
     el("thead", {}, [el("tr", {}, [
@@ -2700,10 +3763,13 @@ function openInvoiceDetails(invId) {
       el("div", { class: "card-title" }, [document.createTextNode(`Invoice ${inv.id}`)]),
       el("div", { class: "card-subtitle" }, [document.createTextNode(`${p?.name || "Unknown"} · ${formatDT(inv.createdAt)}`)]),
       el("div", { style: "margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;" }, [
-        el("span", { class: "chip" }, [document.createTextNode(`Total: ${money(total)}`)]),
+        el("span", { class: "chip" }, [document.createTextNode(`Gross: ${money(gross)}`)]),
+        el("span", { class: "chip" }, [document.createTextNode(`Discount: ${money(discountAmt)}`)]),
+        el("span", { class: "chip" }, [document.createTextNode(`Net: ${money(total)}`)]),
         el("span", { class: "chip" }, [document.createTextNode(`Paid: ${money(inv.paid || 0)}`)]),
         el("span", { class: due === 0 ? "chip good" : "chip bad" }, [document.createTextNode(`Due: ${money(due)}`)]),
         el("span", { class: "chip" }, [document.createTextNode(`Method: ${inv.method || "—"}`)]),
+        el("span", { class: "chip" }, [document.createTextNode(`Payer: ${inv.payer?.type || "Self"}`)]),
       ]),
       el("div", { class: "card-actions" }, [
         el("button", { class: "btn", type: "button", onclick: () => window.print() }, [document.createTextNode("Print")]),
