@@ -1,6 +1,6 @@
 # Doctor Appointment & Diagnostic Prototype (HTML)
 
-Static HTML prototype to visualize the system described in `E:\My Files\projects\Files\prototype.txt`.
+Static HTML prototype to visualize a multi-hub medical network: Central Management + Hub/Branch operations.
 
 ## Run
 
@@ -8,7 +8,7 @@ Use a local server (recommended so `localStorage` works reliably):
 
 ```powershell
 cd "E:\My Files\projects\Doctor-appointment-prototype"
-python -m http.server 5173
+.\serve.ps1
 ```
 
 Open:
@@ -16,43 +16,42 @@ Open:
 - Workspace chooser: `http://localhost:5173/index.html`
 - Central: `http://localhost:5173/central/`
 - Hub/Branch: `http://localhost:5173/hub/`
+- Mono (all-in-one): `http://localhost:5173/app/`
 
 ## End-to-End Flow (Demo)
 
-Patient → Appointment → Prescription → Diagnostics → Billing → Reports
+Patient -> Appointment -> Prescription -> Diagnostics -> Billing -> Reports
 
 - **Patients**: register/search by mobile, open profile
 - **Appointments**: book online/offline, token/queue statuses, mark completed
 - **Prescriptions**: create/edit, open print view
-- **Diagnostics**:
-  - **Upload image** (basic)
-  - **Upload / Scan Diagnostic** (enhanced: preview + scan sources)
-- **Billing**: create invoice, track due, collect payment
+- **Diagnostics**: upload/scan (preview + QR/PDF/image scan), investigation lifecycle
+- **Billing**: create invoice, discounts, track due, collect payment
 - **Reports**: choose report type + filters, export CSV/Excel/PDF
 
 ## Central vs Hub
 
 ### Central (Admin)
 
-Implements the requested central responsibilities:
+Central responsibilities (prototype visualization):
 
-- Manage hubs/branches (add/edit, active/inactive)
-- Doctor assignment & scheduling (assign doctors to hubs)
-- Accounting monitoring (invoice/dues overview)
-- Diagnostic report monitoring + verification workflow
-- Revenue/performance analysis + **Analysis Functions**
-- Centralized patient database
+- Manage all hubs/branches (add/edit, active/inactive) via **Central -> Manage hubs**
+- Doctor assignment and scheduling via **Doctors** (includes optional hub field on doctor add)
+- Accounting monitoring via **Billing** + **Accounting suite**
+- Diagnostic report monitoring via **Diagnostics** + **Investigation lifecycle**
+- Revenue and performance analysis via **Reports**, **Finance reports**, and **Analysis Functions**
+- Centralized patient database via **Patients**
 
 ### Hub / Branch
 
-Daily operations (per branch):
+Daily operations:
 
 - Patient registration
 - Appointment handling
 - Prescriptions
 - Diagnostics upload/scan
 - Billing + due collection
-- Reports
+- Reports + exports
 
 ## Reports (Menu + Filters + Export)
 
@@ -75,36 +74,62 @@ Exports:
 
 - **CSV**: downloads `.csv`
 - **Excel**: downloads `.xls` (HTML-table format, prototype-friendly)
-- **PDF**: uses browser print (`Ctrl+P`) → “Save as PDF”
+- **PDF**: uses browser print (`Ctrl+P`) -> "Save as PDF"
+
+### Finance Reports (Management)
+
+In **Reports -> Finance reports**:
+
+- Daily Cash Collection Report (branch-wise + consolidated)
+- Monthly Income Statement (revenue vs expense)
+- Hub/Branch-wise Revenue Comparison
+- Doctor-wise Income and Commission Report (prototype estimate)
+- Due Collection Aging Report (30/60/90 days)
+- Expense Report by Category
+- Profit & Loss Statement (monthly/quarterly/annual)
+- Payment Method Breakdown Report
+- Employee Medical Benefit Utilization Report
 
 ## Diagnostics: Preview + Scan
 
-In **Diagnostics → Upload / Scan Diagnostic**:
+In **Diagnostics -> Upload image**:
 
-- **Load demo image**: loads a built-in placeholder image in the preview
+- **Load demo image**: loads a built-in placeholder in the preview
 - **Upload file**: pick an image/PDF
 - **Image scan**: camera capture file input (where supported)
 - **PDF scan**: select a PDF
 - **QR scan**: camera QR scan (where supported)
 - **Clear**: resets preview + selected file so a new image loads cleanly
 
-Saved diagnostics store (demo):
+Saved diagnostic entries store (demo):
 
 - `fileName`, `fileType`, optional `previewDataUrl` (images), optional `scannedText` (QR), `source`, `hubId`
 
-### Diagnostic Investigations Lifecycle (Ordering → Delivery)
+### Diagnostic Investigations Lifecycle (Ordering -> Delivery)
 
-In **Diagnostics → Investigation lifecycle**:
+In **Diagnostics -> Investigation lifecycle**:
 
 - Order tests by department (Pathology/Lab, Radiology/Imaging, Cardiology, Special Diagnostics)
-- Track the lifecycle stages:
-  - Ordered → Collected → Processing → Report Draft → Approved → Delivered
+- Track lifecycle stages:
+  - Ordered -> Collected -> Processing -> Report Draft -> Approved -> Delivered
 - Add report summary + remarks, then advance status using **Next step**
 
-## Dashboard: Charts + “Live” Demo Data
+## Dashboard: Charts + "Live" Demo Data
 
 - Dashboard includes simple charts (canvas) for revenue trend and appointment status distribution.
 - **Live Ops (Prototype)** can simulate periodic incoming events to make the dashboard change.
+
+## Accounting & Billing Suite (Advanced)
+
+In **Billing -> Accounting suite**:
+
+- Service billing + itemized invoices
+- Discount management (percent/flat) + benefit/insurance payer tracking
+- Due tracking per patient + reminder notifications (demo)
+- Cash advance + deposit ledger (per branch)
+- Expense entry + petty cash (per branch)
+- Daily closing report (cash register reconciliation)
+- Bank & mobile banking reconciliation entries
 
 ## Notes / Limitations
 
@@ -112,15 +137,3 @@ In **Diagnostics → Investigation lifecycle**:
 - Use **Reset demo data** in the sidebar to restore the default seed.
 - QR scanning requires `BarcodeDetector` + camera permissions (typically Chrome/Edge).
 
-## Accounting & Billing Suite (Advanced)
-
-In **Billing → Accounting suite**:
-
-- Service billing + itemized invoices
-- Discounts (percent/flat/benefit)
-- Due tracking per patient + reminder notifications (demo)
-- Employee benefit / insurance payer tracking
-- Cash advance + deposit ledger (per branch)
-- Expense entry + petty cash (per branch)
-- Daily closing report (cash register reconciliation)
-- Bank & mobile banking reconciliation entries

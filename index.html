@@ -3,141 +3,45 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Doctor Appointment & Diagnostic Prototype</title>
+    <title>Doctor Assist Prototype</title>
     <meta
       name="description"
-      content="Static HTML prototype for patient management, appointments, diagnostics, billing, and reporting."
+      content="Static HTML prototype for a multi-hub medical network (Central + Hub)."
     />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
 
-    <div class="app-shell">
-      <aside class="sidebar" aria-label="Primary navigation">
-        <div class="brand">
-          <div class="brand-mark" aria-hidden="true">DA</div>
-          <div class="brand-text">
-            <div class="brand-title">Doctor Assist</div>
-            <div class="brand-subtitle">Prototype (HTML)</div>
-          </div>
+    <main class="content" id="main" tabindex="-1" style="max-width:1100px; margin:0 auto;">
+      <div class="card soft" style="margin-top:18px;">
+        <div class="card-title">Doctor Assist</div>
+        <div class="card-subtitle">HTML-only prototype to visualize features across Central + Hub operations.</div>
+        <div class="help">Pick a workspace:</div>
+        <div class="grid cols-3" style="margin-top:12px;">
+          <a class="card" href="./central/index.html" style="text-decoration:none;">
+            <div class="card-title">Central Management</div>
+            <div class="card-subtitle">Manage all hubs/branches, monitoring, revenue & performance.</div>
+            <div class="card-actions"><span class="btn">Open Central</span></div>
+          </a>
+          <a class="card" href="./hub/index.html" style="text-decoration:none;">
+            <div class="card-title">Hub / Branch</div>
+            <div class="card-subtitle">Daily operations: appointments, diagnostics, billing, reports.</div>
+            <div class="card-actions"><span class="btn">Open Hub</span></div>
+          </a>
+          <a class="card" href="./app/index.html" style="text-decoration:none;">
+            <div class="card-title">All-in-one (Mono)</div>
+            <div class="card-subtitle">Everything in one navigation for quick review/testing.</div>
+            <div class="card-actions"><span class="btn btn-ghost">Open Mono</span></div>
+          </a>
         </div>
-
-        <nav class="nav" id="nav">
-          <a class="nav-item" href="#/dashboard" data-route="/dashboard">
-            <span class="nav-icon" aria-hidden="true">▦</span>
-            <span>Dashboard</span>
-          </a>
-          <a class="nav-item" href="#/patients" data-route="/patients">
-            <span class="nav-icon" aria-hidden="true">👤</span>
-            <span>Patients</span>
-          </a>
-          <a class="nav-item" href="#/appointments" data-route="/appointments">
-            <span class="nav-icon" aria-hidden="true">📅</span>
-            <span>Appointments</span>
-          </a>
-          <a class="nav-item" href="#/doctors" data-route="/doctors">
-            <span class="nav-icon" aria-hidden="true">🩺</span>
-            <span>Doctors</span>
-          </a>
-          <a class="nav-item" href="#/prescriptions" data-route="/prescriptions">
-            <span class="nav-icon" aria-hidden="true">📝</span>
-            <span>Prescriptions</span>
-          </a>
-          <a class="nav-item" href="#/diagnostics" data-route="/diagnostics">
-            <span class="nav-icon" aria-hidden="true">🧪</span>
-            <span>Diagnostics</span>
-          </a>
-          <a class="nav-item" href="#/billing" data-route="/billing">
-            <span class="nav-icon" aria-hidden="true">💳</span>
-            <span>Billing</span>
-          </a>
-          <a class="nav-item" href="#/reports" data-route="/reports">
-            <span class="nav-icon" aria-hidden="true">📈</span>
-            <span>Reports</span>
-          </a>
-          <div class="nav-divider" role="separator"></div>
-          <a class="nav-item" href="#/central" data-route="/central">
-            <span class="nav-icon" aria-hidden="true">🏥</span>
-            <span>Central Admin</span>
-          </a>
-          <a class="nav-item" href="#/ai" data-route="/ai">
-            <span class="nav-icon" aria-hidden="true">✨</span>
-            <span>AI (Future)</span>
-          </a>
-        </nav>
-
-        <div class="sidebar-footer">
-          <div class="pill">
-            <span class="pill-dot" aria-hidden="true"></span>
-            <span id="envLabel">Local demo data</span>
-          </div>
-          <button class="btn btn-ghost" id="resetBtn" type="button">
-            Reset demo data
-          </button>
-        </div>
-      </aside>
-
-      <div class="main">
-        <header class="topbar">
-          <div class="topbar-left">
-            <button class="icon-btn" id="sidebarToggle" type="button" aria-label="Toggle navigation">
-              ☰
-            </button>
-            <div>
-              <div class="page-title" id="pageTitle">Dashboard</div>
-              <div class="page-subtitle" id="pageSubtitle">Overview of today’s operations</div>
-            </div>
-          </div>
-          <div class="topbar-right">
-            <div class="search">
-              <input
-                id="globalSearch"
-                type="search"
-                placeholder="Search patient / mobile / invoice..."
-                autocomplete="off"
-              />
-              <div class="kbd" aria-hidden="true">/</div>
-            </div>
-            <button class="btn" id="quickActionBtn" type="button">Quick actions</button>
-          </div>
-        </header>
-
-        <main class="content" id="main" tabindex="-1">
-          <div id="toastHost" class="toast-host" aria-live="polite" aria-atomic="true"></div>
-          <div id="view"></div>
-        </main>
-
-        <footer class="footer">
-          <span>Prototype only · No backend · Data stored in your browser</span>
-          <span class="footer-sep" aria-hidden="true">•</span>
-          <span id="clock">—</span>
-        </footer>
       </div>
-    </div>
 
-    <dialog class="modal" id="modal">
-      <form method="dialog" class="modal-card" id="modalForm">
-        <div class="modal-head">
-          <div class="modal-title" id="modalTitle">Modal</div>
-          <button class="icon-btn" value="cancel" aria-label="Close">✕</button>
-        </div>
-        <div class="modal-body" id="modalBody"></div>
-        <div class="modal-actions" id="modalActions">
-          <button class="btn btn-ghost" value="cancel">Cancel</button>
-          <button class="btn" id="modalPrimary" value="default">Save</button>
-        </div>
-      </form>
-    </dialog>
-
-    <template id="tpl-empty">
-      <div class="empty">
-        <div class="empty-title">Nothing here yet</div>
-        <div class="empty-subtitle">Create something using the action buttons.</div>
+      <div class="card" style="margin-top:12px;">
+        <div class="card-title">Run locally</div>
+        <div class="card-subtitle">From this folder:</div>
+        <div class="help"><code>.\serve.ps1</code> then open <code>http://localhost:5173</code></div>
       </div>
-    </template>
-
-    <script src="./app.js" defer></script>
+    </main>
   </body>
 </html>
-

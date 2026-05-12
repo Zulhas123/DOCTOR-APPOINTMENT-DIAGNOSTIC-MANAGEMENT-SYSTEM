@@ -24,7 +24,7 @@ function formatDT(iso) {
 }
 
 function normalizeBullets(text) {
-  return text.replaceAll("â€¢", "•");
+  return text.replaceAll("â€¢", "•").replaceAll("Ã¢â‚¬Â¢", "•");
 }
 
 function loadState() {
@@ -933,14 +933,18 @@ function viewDoctors() {
     ]),
   ]);
 
+  const hubsById = Object.fromEntries((state.hubs || []).map((h) => [h.id, h]));
+
   const list = el("div", { class: "grid cols-3" }, state.doctors.map((d) => {
     const apptCount = state.appointments.filter((a) => a.doctorId === d.id && a.date === todayISO()).length;
+    const hub = hubsById[d.hubId] || null;
     return el("div", { class: "card" }, [
       el("div", { class: "card-title" }, [document.createTextNode(d.name)]),
       el("div", { class: "card-subtitle" }, [document.createTextNode(`${d.specialty} · Room ${d.room}`)]),
       el("div", { style: "margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;" }, [
         el("span", { class: "chip" }, [document.createTextNode(`Today: ${apptCount} appt(s)`) ]),
         el("span", { class: d.active ? "chip good" : "chip bad" }, [document.createTextNode(d.active ? "Active" : "Inactive")]),
+        el("span", { class: "chip" }, [document.createTextNode(`Hub: ${hub?.name || "—"}`)]),
       ]),
       el("div", { class: "card-actions" }, [
         el("button", { class: "btn btn-ghost", type: "button", onclick: () => openDoctorAvailability(d.id) }, [document.createTextNode("Availability")]),
@@ -1444,6 +1448,7 @@ function viewReports() {
           render();
         },
       }, [document.createTextNode("Run report")]),
+      el("button", { class: "btn btn-ghost", type: "button", onclick: () => openFinanceReports() }, [document.createTextNode("Finance reports")]),
     ]),
   ]);
 
@@ -1835,6 +1840,409 @@ function viewReports() {
   return el("div", { class: "grid" }, [header, filtersCard, menuChips, makeTable(title, columns, rows)]);
 }
 
+function openFinanceReports() {
+  const hubs = state.hubs || [];
+  const hubOptions = [{ value: "", label: "All hubs" }, ...hubs.map((h) => ({ value: h.id, label: h.name }))];
+  const payMethods = state.paymentMethods || ["Cash", "Card", "Bank Transfer", "bKash", "Nagad", "Rocket"];
+
+  const reportTypes = [
+    { id: "dailyCash", label: "Daily Cash Collection (Branch-wise + Consolidated)" },
+    { id: "monthlyIncome", label: "Monthly Income Statement (Revenue vs Expense)" },
+    { id: "hubRevenue", label: "Hub/Branch-wise Revenue Comparison" },
+    { id: "doctorIncome", label: "Doctor-wise Income & Commission" },
+    { id: "aging", label: "Due Collection Aging (30/60/90 days)" },
+    { id: "expenseCategory", label: "Expense Report by Category" },
+    { id: "pnl", label: "Profit & Loss (Monthly/Quarterly/Annual)" },
+    { id: "paymentBreakdown", label: "Payment Method Breakdown" },
+    { id: "benefitUtil", label: "Employee Medical Benefit Utilization" },
+  ];
+
+  state.notes = state.notes || {};
+  state.notes.finance = state.notes.finance || {};
+  const prefs = state.notes.finance;
+  prefs.type = prefs.type || "dailyCash";
+  prefs.day = prefs.day || todayISO();
+  prefs.month = prefs.month || prefs.day.slice(0, 7);
+  prefs.scopeHubId = prefs.scopeHubId || "";
+  prefs.pnlPeriod = prefs.pnlPeriod || "Monthly";
+  prefs.commissionPct = Number.isFinite(Number(prefs.commissionPct)) ? Number(prefs.commissionPct) : 30;
+
+  const wrapper = el("div", { class: "grid" }, []);
+
+  const header = el("div", { class: "card soft" }, [
+    el("div", { class: "card-title" }, [document.createTextNode("Finance Reports")]),
+    el("div", { class: "card-subtitle" }, [document.createTextNode("Financial reports for management review (prototype).")]),
+  ]);
+
+  const filterCard = el("div", { class: "card" }, [
+    el("div", { class: "card-title" }, [document.createTextNode("Filters")]),
+    el("div", { class: "card-subtitle" }, [document.createTextNode("Select report type and scope, then export CSV/Excel/PDF.")]),
+  ]);
+
+  const filterForm = el("div", { class: "form", style: "margin-top:10px" }, [
+    fieldSelect("Report type", "type", reportTypes.map((r) => ({ value: r.id, label: r.label })), prefs.type),
+    el("div", { class: "row" }, [
+      fieldInput("Day", "day", "", "date", prefs.day),
+      fieldInput("Month", "month", "", "month", prefs.month),
+    ]),
+    el("div", { class: "row" }, [
+      fieldSelect("Hub scope", "scopeHubId", hubOptions, prefs.scopeHubId),
+      fieldInput("Doctor commission %", "commissionPct", "30", "number", `${prefs.commissionPct}`),
+    ]),
+    fieldSelect("P&L period", "pnlPeriod", ["Monthly", "Quarterly", "Annual"], prefs.pnlPeriod),
+  ]);
+
+  filterCard.append(filterForm);
+
+  const resultsCard = el("div", { class: "card" }, [
+    el("div", { class: "card-title" }, [document.createTextNode("Report Output")]),
+    el("div", { class: "card-subtitle" }, [document.createTextNode("Generated from demo invoices/expenses/ledger entries.")]),
+  ]);
+
+  const outputHost = el("div", { style: "margin-top:10px" }, []);
+  resultsCard.append(outputHost);
+
+  const exportBar = el("div", { class: "card-actions" }, []);
+  resultsCard.insertBefore(exportBar, outputHost);
+
+  const dateInMonth = (iso, month) => (iso || "").slice(0, 7) === month;
+  const dateOnDay = (iso, day) => (iso || "").slice(0, 10) === day;
+
+  function scopedInvoices(hubId) {
+    return hubId ? state.invoices.filter((i) => (i.hubId || "") === hubId) : state.invoices;
+  }
+  function scopedExpenses(hubId) {
+    return hubId ? state.expenses.filter((e) => e.hubId === hubId) : state.expenses;
+  }
+  function scopedCash(hubId) {
+    return hubId ? state.cashLedger.filter((e) => e.hubId === hubId) : state.cashLedger;
+  }
+
+  function buildExport(title, columns, rows) {
+    exportBar.replaceChildren(
+      el(
+        "button",
+        {
+          class: "btn btn-ghost",
+          type: "button",
+          onclick: () => downloadBlob(`${title}.csv`, "text/csv;charset=utf-8", toCSV(columns, rows)),
+        },
+        [document.createTextNode("Export CSV")]
+      ),
+      el(
+        "button",
+        {
+          class: "btn btn-ghost",
+          type: "button",
+          onclick: () => downloadBlob(`${title}.xls`, "application/vnd.ms-excel;charset=utf-8", toXlsHtml(columns, rows, title)),
+        },
+        [document.createTextNode("Export Excel")]
+      ),
+      el("button", { class: "btn btn-ghost", type: "button", onclick: () => window.print() }, [document.createTextNode("Export PDF")])
+    );
+  }
+
+  function renderTable(columns, rows) {
+    const table = el("table", { class: "table" }, [
+      el("thead", {}, [el("tr", {}, columns.map((c) => el("th", {}, [document.createTextNode(c.label)])))]),
+      el(
+        "tbody",
+        {},
+        rows.length
+          ? rows.map((r) => el("tr", {}, columns.map((c) => el("td", {}, [document.createTextNode(String(r[c.key] ?? ""))]))))
+          : [el("tr", {}, [el("td", { colspan: `${columns.length}` }, [renderEmpty()])])]
+      ),
+    ]);
+    outputHost.replaceChildren(table);
+  }
+
+  function compute() {
+    const v = readForm(filterForm);
+    prefs.type = v.type || prefs.type;
+    prefs.day = v.day || todayISO();
+    prefs.month = v.month || prefs.day.slice(0, 7);
+    prefs.scopeHubId = v.scopeHubId || "";
+    prefs.pnlPeriod = v.pnlPeriod || "Monthly";
+    prefs.commissionPct = Number(v.commissionPct || 30);
+    saveState(state);
+
+    const type = prefs.type;
+    const day = prefs.day;
+    const month = prefs.month;
+    const hubId = prefs.scopeHubId;
+    const commissionPct = prefs.commissionPct;
+
+    const invs = scopedInvoices(hubId);
+    const exps = scopedExpenses(hubId);
+    const cash = scopedCash(hubId);
+
+    if (type === "dailyCash") {
+      const rows = hubs.map((h) => {
+        const paidCash = state.invoices
+          .filter((i) => i.hubId === h.id)
+          .filter((i) => dateOnDay(i.createdAt, day))
+          .filter((i) => (i.method || "Cash") === "Cash")
+          .reduce((acc, i) => acc + Number(i.paid || 0), 0);
+
+        const paidMobile = state.invoices
+          .filter((i) => i.hubId === h.id)
+          .filter((i) => dateOnDay(i.createdAt, day))
+          .filter((i) => (i.method || "") !== "Cash")
+          .reduce((acc, i) => acc + Number(i.paid || 0), 0);
+
+        return {
+          hub: h.name,
+          cash: money(paidCash),
+          nonCash: money(paidMobile),
+          total: money(paidCash + paidMobile),
+        };
+      });
+
+      const consolidated = rows.reduce(
+        (acc, r) => {
+          const cashN = Number(String(r.cash).replace(/[^\d.]/g, "")) || 0;
+          const nonCashN = Number(String(r.nonCash).replace(/[^\d.]/g, "")) || 0;
+          acc.cash += cashN;
+          acc.nonCash += nonCashN;
+          acc.total += cashN + nonCashN;
+          return acc;
+        },
+        { cash: 0, nonCash: 0, total: 0 }
+      );
+
+      rows.unshift({ hub: "Consolidated (All Hubs)", cash: money(consolidated.cash), nonCash: money(consolidated.nonCash), total: money(consolidated.total) });
+
+      const columns = [
+        { key: "hub", label: "Hub/Branch" },
+        { key: "cash", label: "Cash" },
+        { key: "nonCash", label: "Non-cash" },
+        { key: "total", label: "Total" },
+      ];
+      buildExport(`daily_cash_${day}`, columns, rows);
+      renderTable(columns, rows);
+      return;
+    }
+
+    if (type === "monthlyIncome") {
+      const revenue = invs.filter((i) => dateInMonth(i.createdAt, month)).reduce((acc, i) => acc + invoiceNet(i), 0);
+      const collected = invs.filter((i) => dateInMonth(i.createdAt, month)).reduce((acc, i) => acc + Number(i.paid || 0), 0);
+      const expense = exps.filter((e) => dateInMonth(e.createdAt, month)).reduce((acc, e) => acc + Number(e.amount || 0), 0);
+      const net = revenue - expense;
+      const rows = [
+        { item: "Revenue (Net billed)", amount: money(revenue) },
+        { item: "Collected (Paid)", amount: money(collected) },
+        { item: "Expenses", amount: money(expense) },
+        { item: "Net Income (Revenue - Expenses)", amount: money(net) },
+      ];
+      const columns = [
+        { key: "item", label: "Item" },
+        { key: "amount", label: "Amount" },
+      ];
+      buildExport(`monthly_income_${month}`, columns, rows);
+      renderTable(columns, rows);
+      return;
+    }
+
+    if (type === "hubRevenue") {
+      const rows = hubs.map((h) => {
+        const revenue = state.invoices.filter((i) => i.hubId === h.id).filter((i) => dateInMonth(i.createdAt, month)).reduce((acc, i) => acc + invoiceNet(i), 0);
+        const collected = state.invoices.filter((i) => i.hubId === h.id).filter((i) => dateInMonth(i.createdAt, month)).reduce((acc, i) => acc + Number(i.paid || 0), 0);
+        return { hub: h.name, revenue: money(revenue), collected: money(collected), due: money(Math.max(0, revenue - collected)) };
+      }).sort((a, b) => Number(String(b.revenue).replace(/[^\d.]/g, "")) - Number(String(a.revenue).replace(/[^\d.]/g, "")));
+      const columns = [
+        { key: "hub", label: "Hub/Branch" },
+        { key: "revenue", label: "Revenue (Net)" },
+        { key: "collected", label: "Collected" },
+        { key: "due", label: "Due" },
+      ];
+      buildExport(`hub_revenue_${month}`, columns, rows);
+      renderTable(columns, rows);
+      return;
+    }
+
+    if (type === "doctorIncome") {
+      // Approximation: doctor income derived from number of completed appointments * consultation fee in invoices.
+      // Commission uses commissionPct over net billed for "Consultation" items linked to that doctor (proxy by appointment count).
+      const consultNet = (inv) => {
+        const gross = (inv.items || []).filter((it) => (it.name || "").toLowerCase().includes("consult")).reduce((acc, it) => acc + Number(it.qty || 0) * Number(it.unit || 0), 0);
+        const discountRatio = sumInvoice(inv) > 0 ? (invoiceDiscountAmount(inv) / sumInvoice(inv)) : 0;
+        return Math.max(0, gross - gross * discountRatio);
+      };
+
+      const rows = state.doctors.map((d) => {
+        const appts = state.appointments.filter((a) => a.doctorId === d.id).filter((a) => (a.date || "").slice(0, 7) === month);
+        const consultRevenue = invs.filter((i) => dateInMonth(i.createdAt, month)).reduce((acc, inv) => acc + consultNet(inv) * (appts.length ? 1 / Math.max(1, state.appointments.filter((a) => (a.date || "").slice(0, 7) === month).length) : 0), 0);
+        const commission = (consultRevenue * commissionPct) / 100;
+        return { doctor: d.name, appointments: appts.length, consultRevenue: money(consultRevenue), commission: money(commission) };
+      }).sort((a, b) => b.appointments - a.appointments);
+
+      const columns = [
+        { key: "doctor", label: "Doctor" },
+        { key: "appointments", label: "Appointments (Month)" },
+        { key: "consultRevenue", label: "Est. Consultation Revenue" },
+        { key: "commission", label: `Commission (${commissionPct}%)` },
+      ];
+      buildExport(`doctor_income_${month}`, columns, rows);
+      renderTable(columns, rows);
+      return;
+    }
+
+    if (type === "aging") {
+      const now = new Date();
+      const buckets = { "0-29": 0, "30-59": 0, "60-89": 0, "90+": 0 };
+      const rows = invs
+        .map((inv) => {
+          const due = invoiceDue(inv);
+          if (due <= 0) return null;
+          const created = new Date(inv.createdAt || inv.createdAt || new Date().toISOString());
+          const days = Math.max(0, Math.floor((now - created) / (1000 * 60 * 60 * 24)));
+          const b = days >= 90 ? "90+" : days >= 60 ? "60-89" : days >= 30 ? "30-59" : "0-29";
+          buckets[b] += due;
+          const p = findById(state.patients, inv.patientId);
+          return { invoice: inv.id, patient: p?.name || "Unknown", days: `${days}`, due: money(due), bucket: b };
+        })
+        .filter(Boolean)
+        .slice(0, 50);
+
+      const summary = Object.entries(buckets).map(([bucket, amount]) => ({ bucket, amount: money(amount) }));
+      const columns = [
+        { key: "bucket", label: "Bucket (days)" },
+        { key: "amount", label: "Total Due" },
+      ];
+      buildExport(`due_aging_${todayISO()}`, columns, summary);
+      renderTable(columns, summary);
+      return;
+    }
+
+    if (type === "expenseCategory") {
+      const rows = exps
+        .filter((e) => dateInMonth(e.createdAt, month))
+        .reduce((acc, e) => {
+          const key = e.category || "Other";
+          acc[key] = (acc[key] || 0) + Number(e.amount || 0);
+          return acc;
+        }, {});
+      const out = Object.entries(rows)
+        .map(([category, amount]) => ({ category, amount: money(amount) }))
+        .sort((a, b) => Number(String(b.amount).replace(/[^\d.]/g, "")) - Number(String(a.amount).replace(/[^\d.]/g, "")));
+      const columns = [
+        { key: "category", label: "Category" },
+        { key: "amount", label: "Amount" },
+      ];
+      buildExport(`expense_by_category_${month}`, columns, out);
+      renderTable(columns, out);
+      return;
+    }
+
+    if (type === "pnl") {
+      const period = prefs.pnlPeriod;
+      const keyFn =
+        period === "Annual"
+          ? (iso) => (iso || "").slice(0, 4)
+          : period === "Quarterly"
+            ? (iso) => {
+                const y = (iso || "").slice(0, 4);
+                const m = Number((iso || "").slice(5, 7) || 1);
+                const q = Math.floor((m - 1) / 3) + 1;
+                return `${y}-Q${q}`;
+              }
+            : (iso) => (iso || "").slice(0, 7);
+
+      const map = new Map();
+      for (const inv of invs) {
+        const k = keyFn(inv.createdAt);
+        map.set(k, map.get(k) || { period: k, revenue: 0, expense: 0 });
+        map.get(k).revenue += invoiceNet(inv);
+      }
+      for (const e of exps) {
+        const k = keyFn(e.createdAt);
+        map.set(k, map.get(k) || { period: k, revenue: 0, expense: 0 });
+        map.get(k).expense += Number(e.amount || 0);
+      }
+
+      const out = [...map.values()]
+        .map((r) => ({ period: r.period, revenue: money(r.revenue), expense: money(r.expense), profit: money(r.revenue - r.expense) }))
+        .sort((a, b) => String(a.period).localeCompare(String(b.period)));
+
+      const columns = [
+        { key: "period", label: "Period" },
+        { key: "revenue", label: "Revenue" },
+        { key: "expense", label: "Expense" },
+        { key: "profit", label: "Profit" },
+      ];
+      buildExport(`pnl_${period.toLowerCase()}`, columns, out);
+      renderTable(columns, out);
+      return;
+    }
+
+    if (type === "paymentBreakdown") {
+      const rows = payMethods.map((m) => {
+        const amt = invs.filter((i) => dateInMonth(i.createdAt, month)).filter((i) => (i.method || "Cash") === m).reduce((acc, i) => acc + Number(i.paid || 0), 0);
+        return { method: m, collected: money(amt) };
+      });
+      const columns = [
+        { key: "method", label: "Payment Method" },
+        { key: "collected", label: "Collected (Paid)" },
+      ];
+      buildExport(`payment_breakdown_${month}`, columns, rows);
+      renderTable(columns, rows);
+      return;
+    }
+
+    if (type === "benefitUtil") {
+      const rows = invs
+        .filter((i) => dateInMonth(i.createdAt, month))
+        .filter((i) => (i.payer?.type || "Self") === "Employee Benefit")
+        .reduce((acc, inv) => {
+          const org = inv.payer?.organization || "Unknown Organization";
+          acc[org] = acc[org] || { organization: org, invoices: 0, net: 0, due: 0 };
+          acc[org].invoices += 1;
+          acc[org].net += invoiceNet(inv);
+          acc[org].due += invoiceDue(inv);
+          return acc;
+        }, {});
+
+      const out = Object.values(rows)
+        .map((r) => ({ organization: r.organization, invoices: `${r.invoices}`, net: money(r.net), due: money(r.due) }))
+        .sort((a, b) => Number(String(b.net).replace(/[^\d.]/g, "")) - Number(String(a.net).replace(/[^\d.]/g, "")));
+
+      const columns = [
+        { key: "organization", label: "Organization" },
+        { key: "invoices", label: "Invoices" },
+        { key: "net", label: "Net Billed" },
+        { key: "due", label: "Due" },
+      ];
+      buildExport(`benefit_util_${month}`, columns, out);
+      renderTable(columns, out);
+      return;
+    }
+
+    // fallback
+    const columns = [{ key: "msg", label: "Message" }];
+    const rows = [{ msg: "Report not implemented yet." }];
+    buildExport("finance_report", columns, rows);
+    renderTable(columns, rows);
+  }
+
+  const actions = el("div", { class: "card-actions" }, [
+    el("button", { class: "btn", type: "button", onclick: compute }, [document.createTextNode("Generate")]),
+    el("button", { class: "btn btn-ghost", type: "button", onclick: () => { prefs.type = "dailyCash"; prefs.day = todayISO(); prefs.month = prefs.day.slice(0,7); prefs.scopeHubId=""; saveState(state); compute(); } }, [document.createTextNode("Reset")]),
+  ]);
+  filterCard.append(actions);
+
+  wrapper.replaceChildren(header, filterCard, resultsCard);
+
+  compute();
+
+  openModal({
+    title: "Finance Reports",
+    bodyNode: wrapper,
+    primaryText: "Close",
+    onPrimary: () => {},
+    wide: true,
+  });
+}
+
 function viewAnalysisFunctions() {
   setTitle("Analysis Functions", "Pre-built analysis views (prototype)");
   activeNav("/analysis-functions");
@@ -1996,38 +2404,190 @@ function viewCentral() {
   setTitle("Central Admin", "Manage hubs/branches, assignments, monitoring (demo)");
   activeNav("/central");
 
+  const overview = el("div", { class: "card soft" }, [
+    el("div", { class: "card-title" }, [document.createTextNode("Central Management")]),
+    el("div", { class: "card-subtitle" }, [document.createTextNode("Control plane for multi-hub operations (prototype).")]),
+    el("div", { style: "margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;" }, [
+      el("span", { class: "chip" }, [document.createTextNode(`Hubs: ${state.hubs.length}`)]),
+      el("span", { class: "chip" }, [document.createTextNode(`Doctors: ${state.doctors.length}`)]),
+      el("span", { class: "chip" }, [document.createTextNode(`Patients: ${state.patients.length}`)]),
+      el("span", { class: "chip" }, [document.createTextNode(`Invoices: ${state.invoices.length}`)]),
+      el("span", { class: "chip" }, [document.createTextNode(`Diagnostics: ${state.diagnostics.length}`)]),
+    ]),
+  ]);
+
+  const capabilities = el("div", { class: "grid cols-3" }, [
+    el("div", { class: "card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Manage all hubs/branches")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Create/update hubs, status and locations (demo).")]),
+      el("div", { class: "card-actions" }, [
+        el("button", { class: "btn", type: "button", onclick: () => openManageHubs() }, [document.createTextNode("Manage hubs")]),
+      ]),
+    ]),
+    el("div", { class: "card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Doctor assignment & scheduling")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Assign doctors and review availability.")]),
+      el("div", { class: "card-actions" }, [
+        el("button", { class: "btn", type: "button", onclick: () => (location.hash = "#/doctors") }, [document.createTextNode("Open scheduling")]),
+      ]),
+    ]),
+    el("div", { class: "card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Accounting monitoring")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Billing oversight, dues, reconciliation, closing.")]),
+      el("div", { class: "card-actions" }, [
+        el("button", { class: "btn", type: "button", onclick: () => (location.hash = "#/billing") }, [document.createTextNode("Open billing")]),
+        el("button", { class: "btn btn-ghost", type: "button", onclick: () => openAccountingSuite() }, [document.createTextNode("Accounting suite")]),
+      ]),
+    ]),
+    el("div", { class: "card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Diagnostic report monitoring")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Monitor investigations and uploaded imaging/report flow.")]),
+      el("div", { class: "card-actions" }, [
+        el("button", { class: "btn", type: "button", onclick: () => (location.hash = "#/diagnostics") }, [document.createTextNode("Open diagnostics")]),
+        el("button", { class: "btn btn-ghost", type: "button", onclick: () => openInvestigationLifecycle() }, [document.createTextNode("Investigation lifecycle")]),
+      ]),
+    ]),
+    el("div", { class: "card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Revenue & performance analysis")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Compare hubs, cash collection, P&L, payment mix.")]),
+      el("div", { class: "card-actions" }, [
+        el("button", { class: "btn", type: "button", onclick: () => (location.hash = "#/reports") }, [document.createTextNode("Open reports")]),
+        el("button", { class: "btn btn-ghost", type: "button", onclick: () => openFinanceReports() }, [document.createTextNode("Finance reports")]),
+      ]),
+    ]),
+    el("div", { class: "card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Centralized patient database")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Single patient master across hubs (demo).")]),
+      el("div", { class: "card-actions" }, [
+        el("button", { class: "btn", type: "button", onclick: () => (location.hash = "#/patients") }, [document.createTextNode("Open patients")]),
+      ]),
+    ]),
+  ]);
+
   const hubs = el("div", { class: "grid cols-3" }, state.hubs.map((h) => {
+    const invCount = state.invoices.filter((inv) => (inv.hubId || "hub_main") === h.id).length;
+    const diaCount = state.diagnostics.filter((d) => (d.hubId || "hub_main") === h.id).length;
     return el("div", { class: "card" }, [
       el("div", { class: "card-title" }, [document.createTextNode(h.name)]),
       el("div", { class: "card-subtitle" }, [document.createTextNode(h.city)]),
       el("div", { style: "margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;" }, [
         el("span", { class: h.active ? "chip good" : "chip bad" }, [document.createTextNode(h.active ? "Active" : "Inactive")]),
-        el("span", { class: "chip" }, [document.createTextNode(`Doctors: ${state.doctors.length}`)]),
+        el("span", { class: "chip" }, [document.createTextNode(`Invoices: ${invCount}`)]),
+        el("span", { class: "chip" }, [document.createTextNode(`Diagnostics: ${diaCount}`)]),
       ]),
       el("div", { class: "card-actions" }, [
-        el("button", { class: "btn btn-ghost", type: "button", onclick: () => toast("Central", "Hub configuration is demo-only.") }, [document.createTextNode("Configure")]),
+        el("button", { class: "btn btn-ghost", type: "button", onclick: () => openEditHub(h.id) }, [document.createTextNode("Edit")]),
       ]),
     ]);
   }));
 
-  const admin = el("div", { class: "card soft" }, [
-    el("div", { class: "card-title" }, [document.createTextNode("Central Management Capabilities")]),
-    el("div", { class: "card-subtitle" }, [document.createTextNode("In the full system, Central manages all hubs/branches.")]),
-    el("div", { class: "grid cols-2", style: "margin-top:10px" }, [
-      el("div", { class: "card" }, [
-        el("div", { class: "card-title" }, [document.createTextNode("Scheduling & assignment")]),
-        el("div", { class: "card-subtitle" }, [document.createTextNode("Doctor assignment and schedule monitoring.")]),
-        el("div", { class: "help" }, [document.createTextNode("Prototype: manage doctors under the Doctors menu.")]),
-      ]),
-      el("div", { class: "card" }, [
-        el("div", { class: "card-title" }, [document.createTextNode("Accounting & performance")]),
-        el("div", { class: "card-subtitle" }, [document.createTextNode("Revenue and performance analysis dashboard.")]),
-        el("div", { class: "help" }, [document.createTextNode("Prototype: see Reports for summary cards.")]),
-      ]),
+  return el("div", { class: "grid" }, [overview, capabilities, el("div", { class: "card soft" }, [
+    el("div", { class: "card-title" }, [document.createTextNode("Hubs / Branches")]),
+    el("div", { class: "card-subtitle" }, [document.createTextNode("Overview by hub (demo data).")]),
+    el("div", { class: "card-actions" }, [
+      el("button", { class: "btn", type: "button", onclick: () => openManageHubs() }, [document.createTextNode("Manage hubs")]),
+    ]),
+  ]), hubs]);
+}
+
+function openManageHubs() {
+  const addCard = el("div", { class: "card soft" }, [
+    el("div", { class: "card-title" }, [document.createTextNode("Add hub/branch")]),
+    el("div", { class: "card-subtitle" }, [document.createTextNode("Prototype-only CRUD stored in localStorage.")]),
+    el("div", { class: "row", style: "margin-top:10px" }, [
+      fieldInput("Name", "name", "e.g., Gulshan Branch"),
+      fieldInput("City", "city", "e.g., Dhaka"),
+      fieldSelect("Status", "active", [{ value: "true", label: "Active" }, { value: "false", label: "Inactive" }], "true"),
+    ]),
+    el("div", { class: "card-actions" }, [
+      el("button", {
+        class: "btn",
+        type: "button",
+        onclick: () => {
+          const v = readForm(addCard);
+          if (!v.name?.trim()) return toast("Missing fields", "Hub name is required.");
+          const hub = { id: uid("hub"), name: v.name.trim(), city: (v.city || "").trim() || "—", active: v.active === "true" };
+          state.hubs.push(hub);
+          saveState(state);
+          toast("Hub added", hub.name);
+          openManageHubs();
+        },
+      }, [document.createTextNode("Add hub")]),
+      el("button", { class: "btn btn-ghost", type: "button", onclick: () => openFinanceReports() }, [document.createTextNode("Finance reports")]),
     ]),
   ]);
 
-  return el("div", { class: "grid" }, [admin, hubs]);
+  const rows = state.hubs.map((h) =>
+    el("tr", {}, [
+      el("td", {}, [el("strong", {}, [document.createTextNode(h.name)]), el("div", { class: "help" }, [document.createTextNode(h.id)])]),
+      el("td", {}, [document.createTextNode(h.city || "—")]),
+      el("td", {}, [document.createTextNode(h.active ? "Active" : "Inactive")]),
+      el("td", {}, [
+        el("button", { class: "btn btn-ghost", type: "button", onclick: () => openEditHub(h.id) }, [document.createTextNode("Edit")]),
+      ]),
+    ])
+  );
+
+  const table = el("table", { class: "table" }, [
+    el("thead", {}, [
+      el("tr", {}, [
+        el("th", {}, [document.createTextNode("Hub/Branch")]),
+        el("th", {}, [document.createTextNode("City")]),
+        el("th", {}, [document.createTextNode("Status")]),
+        el("th", {}, [document.createTextNode("")]),
+      ]),
+    ]),
+    el("tbody", {}, rows.length ? rows : [el("tr", {}, [el("td", { colspan: "4" }, [renderEmpty()])])]),
+  ]);
+
+  const listCard = el("div", { class: "card" }, [
+    el("div", { class: "card-title" }, [document.createTextNode("Hubs/Branches")]),
+    el("div", { class: "card-subtitle" }, [document.createTextNode("Edit hub details; data affects filters and reports.")]),
+    table,
+  ]);
+
+  openModal({
+    title: "Manage Hubs / Branches",
+    bodyNode: el("div", { class: "grid" }, [addCard, listCard]),
+    primaryText: "Close",
+    onPrimary: () => {},
+    wide: true,
+  });
+}
+
+function openEditHub(hubId) {
+  const hub = findById(state.hubs, hubId);
+  if (!hub) return toast("Not found", "Hub does not exist.");
+
+  const body = el("div", { class: "grid" }, [
+    el("div", { class: "card soft" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Edit hub/branch")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Update hub status and location (demo).")]),
+      el("div", { class: "row", style: "margin-top:10px" }, [
+        fieldInput("Name", "name", "", "text", hub.name),
+        fieldInput("City", "city", "", "text", hub.city || ""),
+        fieldSelect("Status", "active", [{ value: "true", label: "Active" }, { value: "false", label: "Inactive" }], hub.active ? "true" : "false"),
+      ]),
+      el("div", { class: "help" }, [document.createTextNode(`ID: ${hub.id}`)]),
+    ]),
+  ]);
+
+  openModal({
+    title: `Edit Hub — ${hub.name}`,
+    bodyNode: body,
+    primaryText: "Save changes",
+    onPrimary: () => {
+      const v = readForm(body);
+      if (!v.name?.trim()) return toast("Missing fields", "Hub name is required.");
+      hub.name = v.name.trim();
+      hub.city = (v.city || "").trim() || "—";
+      hub.active = v.active === "true";
+      saveState(state);
+      toast("Saved", hub.name);
+      render();
+    },
+    wide: true,
+  });
 }
 
 function viewAI() {
@@ -2332,6 +2892,7 @@ function openMarkCompleted() {
 }
 
 function openAddDoctor() {
+  const hubOptions = (state.hubs || []).map((h) => ({ value: h.id, label: h.name }));
   const body = el("div", { class: "form" }, [
     el("div", { class: "row" }, [
       fieldInput("Doctor name", "name", "e.g., Dr. Nazmul Hasan"),
@@ -2340,6 +2901,9 @@ function openAddDoctor() {
     el("div", { class: "row" }, [
       fieldInput("Room", "room", "e.g., 101"),
       fieldSelect("Status", "active", [{ value: "true", label: "Active" }, { value: "false", label: "Inactive" }]),
+    ]),
+    el("div", { class: "row" }, [
+      fieldSelect("Hub/Branch", "hubId", hubOptions.length ? hubOptions : [{ value: "hub_main", label: "Main Hub" }], hubOptions[0]?.value || "hub_main"),
     ]),
   ]);
   openModal({
@@ -2350,6 +2914,7 @@ function openAddDoctor() {
       const v = readForm(body);
       if (!v.name || !v.specialty) return toast("Missing fields", "Name and specialty are required.");
       state.doctors.unshift({ id: uid("doc"), name: v.name, specialty: v.specialty, room: v.room || "—", active: v.active !== "false" });
+      if (state.doctors[0] && !state.doctors[0].hubId) state.doctors[0].hubId = v.hubId || (state.hubs?.[0]?.id || "hub_main");
       saveState(state);
       toast("Doctor added", v.name);
       render();
@@ -2791,7 +3356,7 @@ function openUploadDiagnosticEnhanced() {
         patientId: v.patientId,
         hubId: v.hubId || "",
         testType: v.testType || "X-Ray",
-        bodyPart: v.bodyPart || "â€”",
+        bodyPart: v.bodyPart || "—",
         status: "Uploaded",
         fileName,
         fileType: selected.fileType || "",
