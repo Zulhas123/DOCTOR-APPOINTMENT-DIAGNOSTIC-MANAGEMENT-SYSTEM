@@ -4,6 +4,176 @@ const STORAGE_KEY = "doctor-assist-prototype:v1";
 const CONTEXT =
   typeof window !== "undefined" && window.APP_CONTEXT ? window.APP_CONTEXT : "mono";
 
+const AUTH_KEY = "doctor-assist-auth:v1";
+const AUTH_DEFAULT_USER = "admin";
+const AUTH_DEFAULT_PASS = "admin123";
+
+function authRead() {
+  try {
+    const s = sessionStorage.getItem(AUTH_KEY);
+    if (s) return JSON.parse(s);
+  } catch {}
+  try {
+    const p = localStorage.getItem(AUTH_KEY);
+    if (p) return JSON.parse(p);
+  } catch {}
+  return null;
+}
+
+function isAuthed() {
+  const a = authRead();
+  return !!(a && a.user && a.at);
+}
+
+function authSet({ user, persist }) {
+  const payload = { user, at: Date.now(), persist: !!persist };
+  if (payload.persist) localStorage.setItem(AUTH_KEY, JSON.stringify(payload));
+  else sessionStorage.setItem(AUTH_KEY, JSON.stringify(payload));
+}
+
+function authClear() {
+  try { sessionStorage.removeItem(AUTH_KEY); } catch {}
+  try { localStorage.removeItem(AUTH_KEY); } catch {}
+}
+
+function defaultPostLoginRoute() {
+  return CONTEXT === "central" ? "#/central" : "#/dashboard";
+}
+
+function ensureAuthOverlay() {
+  let host = document.getElementById("authOverlay");
+  if (host) return host;
+
+  host = el("div", { class: "auth-overlay", id: "authOverlay" }, []);
+  document.body.append(host);
+  return host;
+}
+
+function showLoginView({ message } = {}) {
+  document.body.classList.add("auth-locked");
+  const host = ensureAuthOverlay();
+
+  const title = CONTEXT === "central" ? "Central Login" : "Login";
+  const subtitle = CONTEXT === "central"
+    ? "Sign in to access Central Management"
+    : CONTEXT === "hub"
+      ? "Sign in to access Hub Dashboard"
+      : "Sign in to access the Dashboard";
+
+  const form = el("form", { class: "auth-card", autocomplete: "on" }, []);
+  const userId = uid("auth_user");
+  const passId = uid("auth_pass");
+  const rememberId = uid("auth_remember");
+  const msgNode = el("div", { class: "auth-msg", id: "authMsg" }, [
+    document.createTextNode(message || ""),
+  ]);
+
+  const userInput = el("input", {
+    id: userId,
+    name: "username",
+    type: "text",
+    placeholder: "Username",
+    autocomplete: "username",
+    value: AUTH_DEFAULT_USER,
+    required: "",
+  });
+  const passInput = el("input", {
+    id: passId,
+    name: "password",
+    type: "password",
+    placeholder: "Password",
+    autocomplete: "current-password",
+    required: "",
+  });
+
+  const passRow = el("div", { class: "auth-passrow" }, [
+    passInput,
+    el("button", {
+      class: "btn btn-ghost",
+      type: "button",
+      onclick: () => {
+        passInput.type = passInput.type === "password" ? "text" : "password";
+      },
+      "aria-label": "Show or hide password",
+    }, [document.createTextNode("Show")]),
+  ]);
+
+  const remember = el("label", { class: "auth-remember", for: rememberId }, [
+    el("input", { id: rememberId, type: "checkbox" }),
+    document.createTextNode("Keep me signed in on this device"),
+  ]);
+
+  const submitBtn = el("button", { class: "btn", type: "submit" }, [document.createTextNode("Sign in")]);
+
+  form.append(
+    el("div", { class: "auth-title" }, [document.createTextNode(title)]),
+    el("div", { class: "auth-subtitle" }, [document.createTextNode(subtitle)]),
+    message ? msgNode : el("div", { class: "auth-msg", id: "authMsg", style: "display:none" }, []),
+    el("div", { class: "auth-field" }, [
+      el("label", { for: userId }, [document.createTextNode("Username")]),
+      userInput,
+    ]),
+    el("div", { class: "auth-field" }, [
+      el("label", { for: passId }, [document.createTextNode("Password")]),
+      passRow,
+    ]),
+    remember,
+    el("div", { class: "auth-actions" }, [submitBtn]),
+    el("div", { class: "auth-hint" }, [
+      document.createTextNode("Demo credentials: "),
+      el("span", { class: "tag" }, [document.createTextNode(AUTH_DEFAULT_USER)]),
+      document.createTextNode(" / "),
+      el("span", { class: "tag" }, [document.createTextNode(AUTH_DEFAULT_PASS)]),
+    ])
+  );
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const u = (userInput.value || "").trim();
+    const p = passInput.value || "";
+    const ok = u === AUTH_DEFAULT_USER && p === AUTH_DEFAULT_PASS;
+    if (!ok) {
+      const m = document.getElementById("authMsg");
+      if (m) {
+        m.style.display = "";
+        m.textContent = "Invalid username or password.";
+      }
+      passInput.focus();
+      passInput.select?.();
+      return;
+    }
+
+    authSet({ user: u, persist: document.getElementById(rememberId)?.checked });
+    document.body.classList.remove("auth-locked");
+    const target = defaultPostLoginRoute();
+    if (!location.hash || location.hash === "#/") location.hash = target;
+    wireAuthUI();
+    render();
+    toast("Signed in", `Welcome, ${u}.`);
+  });
+
+  host.replaceChildren(
+    el("div", { class: "auth-wrap" }, [
+      el("div", { class: "auth-brand" }, [
+        el("div", { class: "brand-mark", "aria-hidden": "true" }, [document.createTextNode("DA")]),
+        el("div", {}, [
+          el("div", { style: "font-weight:760; font-size:18px; letter-spacing:.2px" }, [document.createTextNode("Doctor Assist")]),
+          el("div", { class: "help", style: "margin-top:4px" }, [document.createTextNode("Secure demo sign-in (prototype)")]),
+        ]),
+      ]),
+      form,
+    ])
+  );
+
+  requestAnimationFrame(() => {
+    passInput.focus();
+  });
+}
+
+function hideLoginView() {
+  document.body.classList.remove("auth-locked");
+}
+
 function uid(prefix = "id") {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
 }
@@ -185,6 +355,13 @@ state.paymentMethods = state.paymentMethods || [
   "Nagad",
   "Rocket",
 ];
+state.hotline = state.hotline || {
+  primaryPhone: "+1 310 555 0199",
+  backupPhones: ["+1 213 555 0107"],
+  whatsapp: "+1 310 555 0199",
+  email: "support@doctorassist.demo",
+  label: "24/7 Hotline",
+};
 // Backfill missing fields for older demo states.
 for (const inv of state.investigations) {
   inv.priority = inv.priority || "Routine";
@@ -706,7 +883,14 @@ function viewDashboard() {
 
   ensureLiveOps();
 
-  return el("div", { class: "grid" }, [left, el("div", { class: "split" }, [workflow, quickPanelCard()]), liveCard, charts, ops]);
+  return el("div", { class: "grid" }, [
+    left,
+    el("div", { class: "split" }, [workflow, quickPanelCard()]),
+    hotlineCard(),
+    liveCard,
+    charts,
+    ops,
+  ]);
 }
 
 function statCard(title, value, subtitle) {
@@ -738,6 +922,515 @@ function quickPanelCard() {
     ]),
   ]);
 }
+
+function phoneToTel(phone) {
+  return (phone || "").replace(/[^\d+]/g, "");
+}
+
+function phoneToWa(phone) {
+  return (phone || "").replace(/[^\d]/g, "");
+}
+
+function hotlineNumbers() {
+  const h = state.hotline || {};
+  const nums = [h.primaryPhone, ...(h.backupPhones || [])].map((p) => (p || "").trim()).filter(Boolean);
+  const uniq = [];
+  for (const n of nums) if (!uniq.includes(n)) uniq.push(n);
+  return uniq;
+}
+
+function startHotlineCallSequence() {
+  const nums = hotlineNumbers();
+  if (!nums.length) return toast("Missing", "No hotline numbers configured.");
+
+  const tel0 = phoneToTel(nums[0]);
+  if (!tel0) return toast("Invalid", "Primary hotline number is invalid.");
+
+  const next = nums[1] ? phoneToTel(nums[1]) : "";
+  let cancelled = false;
+  let timer = null;
+
+  const cancel = () => {
+    cancelled = true;
+    if (timer) clearTimeout(timer);
+    $("#modal")?.close();
+  };
+
+  const body = el("div", { class: "grid" }, [
+    el("div", { class: "card soft" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Calling Hotline")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Your phone will open the dial screen.")]),
+      el("div", { class: "help" }, [
+        document.createTextNode(`Primary: ${nums[0]}`),
+        next ? document.createTextNode(` • Backup: ${nums[1]}`) : document.createTextNode(""),
+      ]),
+    ]),
+    el("div", { class: "card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("Auto fallback")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode(next ? "If the first number is not reachable, we’ll try the backup in ~12 seconds." : "No backup number configured.")]),
+      el("div", { class: "help" }, [document.createTextNode("Note: some mobile browsers may require a tap to start each call.")]),
+    ]),
+  ]);
+
+  openModal({
+    title: "Hotline",
+    bodyNode: body,
+    primaryText: "Cancel",
+    onPrimary: cancel,
+    wide: true,
+  });
+
+  const go = (tel) => {
+    try { window.location.href = `tel:${tel}`; }
+    catch { toast("Not supported", "Your browser blocked dialing."); }
+  };
+
+  go(tel0);
+
+  if (next) {
+    timer = setTimeout(() => {
+      if (cancelled) return;
+      toast("Fallback", "Trying backup number…");
+      go(next);
+    }, 12_000);
+  }
+}
+
+function hotlineCard() {
+  const h = state.hotline || {};
+  const nums = hotlineNumbers();
+  const primary = nums[0] || "";
+  const tel = phoneToTel(primary);
+  const wa = phoneToWa(h.whatsapp || primary);
+  const mail = (h.email || "").trim();
+
+  const qr = tel ? qrToSvg(`tel:${tel}`, 156) : null;
+
+  const list = el("div", { class: "grid cols-2", style: "margin-top:10px" }, [
+    el("div", { class: "card soft" }, [
+      el("div", { class: "card-title" }, [document.createTextNode(h.label || "Hotline")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode("Mobile/phone, WhatsApp, and email for support.")]),
+      el("div", { style: "margin-top:10px; display:grid; gap:8px" }, [
+        el("div", { class: "chip" }, [document.createTextNode(`Primary: ${primary || "—"}`)]),
+        nums[1] ? el("div", { class: "chip" }, [document.createTextNode(`Backup: ${nums[1]}`)]) : el("div", { class: "chip" }, [document.createTextNode("Backup: —")]),
+        el("div", { class: "chip" }, [document.createTextNode(`WhatsApp: ${h.whatsapp || primary || "—"}`)]),
+        el("div", { class: "chip" }, [document.createTextNode(`Email: ${mail || "—"}`)]),
+      ]),
+      el("div", { class: "card-actions" }, [
+        el("button", { class: "btn", type: "button", onclick: () => startHotlineCallSequence() }, [document.createTextNode("Call hotline")]),
+        wa ? el("a", { class: "btn btn-ghost", href: `https://wa.me/${wa}`, target: "_blank", rel: "noreferrer" }, [document.createTextNode("WhatsApp chat")]) : el("button", { class: "btn btn-ghost", type: "button", disabled: "" }, [document.createTextNode("WhatsApp chat")]),
+        mail ? el("a", { class: "btn btn-ghost", href: `mailto:${mail}` }, [document.createTextNode("Email")]) : el("button", { class: "btn btn-ghost", type: "button", disabled: "" }, [document.createTextNode("Email")]),
+      ]),
+      el("div", { class: "help" }, [document.createTextNode("Tip: scan the QR from a phone camera to open the dial screen.")]),
+    ]),
+    el("div", { class: "card" }, [
+      el("div", { class: "card-title" }, [document.createTextNode("QR to Call")]),
+      el("div", { class: "card-subtitle" }, [document.createTextNode(primary ? primary : "Set a primary hotline number")]),
+      qr
+        ? el("div", { class: "qr-wrap", style: "margin-top:10px" }, [qr])
+        : el("div", { class: "empty", style: "margin-top:10px" }, [
+          el("div", { class: "empty-title" }, [document.createTextNode("No number")]),
+          el("div", { class: "empty-subtitle" }, [document.createTextNode("Configure a primary hotline number to generate a QR.")]),
+        ]),
+      tel ? el("div", { class: "card-actions" }, [
+        el("a", { class: "btn btn-ghost", href: `tel:${tel}` }, [document.createTextNode("Open dialer")]),
+      ]) : el("div", { class: "card-actions" }, [
+        el("button", { class: "btn btn-ghost", type: "button", disabled: "" }, [document.createTextNode("Open dialer")]),
+      ]),
+    ]),
+  ]);
+
+  return el("div", { class: "card" }, [
+    el("div", { class: "card-title" }, [document.createTextNode("Contact & Hotline")]),
+    el("div", { class: "card-subtitle" }, [document.createTextNode("Fast support access for staff and patients")]),
+    list,
+  ]);
+}
+
+// QR generation (no external libs): lightweight implementation based on Nayuki QR Code generator (byte mode).
+// Public-domain compatible reference: https://www.nayuki.io/page/qr-code-generator-library
+function qrToSvg(text, size = 160) {
+  const qr = QrCode.encodeText(String(text || ""), QrCode.Ecc.MEDIUM);
+  const border = 2;
+  const scale = Math.max(1, Math.floor(size / (qr.size + border * 2)));
+  const dim = (qr.size + border * 2) * scale;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", `0 0 ${dim} ${dim}`);
+  svg.setAttribute("width", `${dim}`);
+  svg.setAttribute("height", `${dim}`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "QR code");
+
+  const bg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  bg.setAttribute("x", "0");
+  bg.setAttribute("y", "0");
+  bg.setAttribute("width", `${dim}`);
+  bg.setAttribute("height", `${dim}`);
+  bg.setAttribute("fill", "white");
+  svg.appendChild(bg);
+
+  const fg = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  fg.setAttribute("fill", "black");
+  const parts = [];
+  for (let y = 0; y < qr.size; y++) {
+    for (let x = 0; x < qr.size; x++) {
+      if (qr.getModule(x, y)) {
+        const rx = (x + border) * scale;
+        const ry = (y + border) * scale;
+        parts.push(`M${rx},${ry}h${scale}v${scale}h-${scale}z`);
+      }
+    }
+  }
+  fg.setAttribute("d", parts.join(""));
+  svg.appendChild(fg);
+  return svg;
+}
+
+/* ---- Minimal QR implementation (Nayuki) ---- */
+class QrSegment {
+  constructor(mode, numChars, bitData) {
+    this.mode = mode;
+    this.numChars = numChars;
+    this.bitData = bitData;
+  }
+  static makeBytes(data) {
+    const bb = [];
+    for (const b of data) bb.push(b & 0xff);
+    return new QrSegment(QrSegment.Mode.BYTE, data.length, QrSegment._bytesToBits(bb));
+  }
+  static makeText(text) {
+    const utf8 =
+      typeof TextEncoder !== "undefined"
+        ? new TextEncoder().encode(text)
+        : Uint8Array.from(unescape(encodeURIComponent(text)).split("").map((c) => c.charCodeAt(0)));
+    return QrSegment.makeBytes(utf8);
+  }
+  static _bytesToBits(bytes) {
+    const out = [];
+    for (const b of bytes) for (let i = 7; i >= 0; i--) out.push((b >>> i) & 1);
+    return out;
+  }
+}
+QrSegment.Mode = {
+  BYTE: { modeBits: 0x4, numBitsCharCount: (ver) => (ver <= 9 ? 8 : ver <= 26 ? 16 : 16) },
+};
+
+class QrCode {
+  constructor(version, errCorLvl, dataCodewords, mask) {
+    this.version = version;
+    this.errorCorrectionLevel = errCorLvl;
+    this.size = version * 4 + 17;
+    this.mask = mask;
+    this.modules = Array.from({ length: this.size }, () => Array(this.size).fill(false));
+    this.isFunction = Array.from({ length: this.size }, () => Array(this.size).fill(false));
+    this._drawFunctionPatterns();
+    const allCodewords = this._addEccAndInterleave(dataCodewords);
+    this._drawCodewords(allCodewords);
+    this._applyMask(mask);
+    this._drawFormatBits(errCorLvl, mask);
+  }
+
+  static encodeText(text, ecl) {
+    const seg = QrSegment.makeText(text);
+    return QrCode.encodeSegments([seg], ecl);
+  }
+
+  static encodeSegments(segs, ecl) {
+    let version = 1;
+    for (; version <= 10; version++) {
+      const dataCapacityBits = QrCode._getNumDataCodewords(version, ecl) * 8;
+      const usedBits = QrCode._getTotalBits(segs, version);
+      if (usedBits !== null && usedBits <= dataCapacityBits) break;
+    }
+    if (version > 10) version = 10;
+    const dataCapacityBits = QrCode._getNumDataCodewords(version, ecl) * 8;
+    const bb = [];
+    for (const seg of segs) {
+      QrCode._appendBits(bb, seg.mode.modeBits, 4);
+      QrCode._appendBits(bb, seg.numChars, seg.mode.numBitsCharCount(version));
+      bb.push(...seg.bitData);
+    }
+    QrCode._appendBits(bb, 0, Math.min(4, dataCapacityBits - bb.length));
+    while (bb.length % 8 !== 0) bb.push(0);
+    const dataCodewords = [];
+    for (let i = 0; i < bb.length; i += 8) {
+      let val = 0;
+      for (let j = 0; j < 8; j++) val = (val << 1) | bb[i + j];
+      dataCodewords.push(val);
+    }
+    for (let pad = 0; dataCodewords.length < QrCode._getNumDataCodewords(version, ecl); pad++) {
+      dataCodewords.push(pad % 2 === 0 ? 0xec : 0x11);
+    }
+    let bestMask = 0;
+    let bestScore = Infinity;
+    let best = null;
+    for (let mask = 0; mask < 8; mask++) {
+      const qr = new QrCode(version, ecl, dataCodewords, mask);
+      const score = qr._getPenaltyScore();
+      if (score < bestScore) {
+        bestScore = score;
+        bestMask = mask;
+        best = qr;
+      }
+    }
+    return best || new QrCode(version, ecl, dataCodewords, bestMask);
+  }
+
+  getModule(x, y) {
+    return this.modules[y][x];
+  }
+
+  _drawFunctionPatterns() {
+    const s = this.size;
+    const drawFinder = (x, y) => {
+      for (let dy = -1; dy <= 7; dy++) {
+        for (let dx = -1; dx <= 7; dx++) {
+          const xx = x + dx, yy = y + dy;
+          if (0 <= xx && xx < s && 0 <= yy && yy < s) {
+            const on = (0 <= dx && dx <= 6 && (dy === 0 || dy === 6)) ||
+              (0 <= dy && dy <= 6 && (dx === 0 || dx === 6)) ||
+              (2 <= dx && dx <= 4 && 2 <= dy && dy <= 4);
+            this.modules[yy][xx] = on;
+            this.isFunction[yy][xx] = true;
+          }
+        }
+      }
+    };
+    drawFinder(0, 0);
+    drawFinder(s - 7, 0);
+    drawFinder(0, s - 7);
+
+    for (let i = 0; i < s; i++) {
+      this._setFunctionModule(6, i, i % 2 === 0);
+      this._setFunctionModule(i, 6, i % 2 === 0);
+    }
+
+    this._setFunctionModule(8, s - 8, true);
+  }
+
+  _setFunctionModule(x, y, isBlack) {
+    this.modules[y][x] = isBlack;
+    this.isFunction[y][x] = true;
+  }
+
+  _drawFormatBits(ecl, mask) {
+    const data = (QrCode.Ecc._formatBits(ecl) << 3) | mask;
+    let rem = data;
+    for (let i = 0; i < 10; i++) rem = (rem << 1) ^ (((rem >>> 9) & 1) * 0x537);
+    const bits = ((data << 10) | rem) ^ 0x5412;
+    const s = this.size;
+    for (let i = 0; i <= 5; i++) this._setFunctionModule(8, i, ((bits >>> i) & 1) !== 0);
+    this._setFunctionModule(8, 7, ((bits >>> 6) & 1) !== 0);
+    this._setFunctionModule(8, 8, ((bits >>> 7) & 1) !== 0);
+    this._setFunctionModule(7, 8, ((bits >>> 8) & 1) !== 0);
+    for (let i = 9; i < 15; i++) this._setFunctionModule(14 - i, 8, ((bits >>> i) & 1) !== 0);
+
+    for (let i = 0; i < 8; i++) this._setFunctionModule(s - 1 - i, 8, ((bits >>> i) & 1) !== 0);
+    for (let i = 8; i < 15; i++) this._setFunctionModule(8, s - 15 + i, ((bits >>> i) & 1) !== 0);
+  }
+
+  _drawCodewords(data) {
+    const s = this.size;
+    let i = 0;
+    for (let right = s - 1; right >= 1; right -= 2) {
+      if (right === 6) right--;
+      for (let vert = 0; vert < s; vert++) {
+        for (let j = 0; j < 2; j++) {
+          const x = right - j;
+          const y = ((right + 1) & 2) === 0 ? s - 1 - vert : vert;
+          if (!this.isFunction[y][x] && i < data.length * 8) {
+            const bit = ((data[i >>> 3] >>> (7 - (i & 7))) & 1) !== 0;
+            this.modules[y][x] = bit;
+            i++;
+          }
+        }
+      }
+    }
+  }
+
+  _applyMask(mask) {
+    const s = this.size;
+    for (let y = 0; y < s; y++) {
+      for (let x = 0; x < s; x++) {
+        if (this.isFunction[y][x]) continue;
+        const invert = QrCode._maskFunc(mask, x, y);
+        if (invert) this.modules[y][x] = !this.modules[y][x];
+      }
+    }
+  }
+
+  static _maskFunc(mask, x, y) {
+    switch (mask) {
+      case 0: return (x + y) % 2 === 0;
+      case 1: return y % 2 === 0;
+      case 2: return x % 3 === 0;
+      case 3: return (x + y) % 3 === 0;
+      case 4: return ((Math.floor(y / 2) + Math.floor(x / 3)) % 2) === 0;
+      case 5: return ((x * y) % 2 + (x * y) % 3) === 0;
+      case 6: return (((x * y) % 2 + (x * y) % 3) % 2) === 0;
+      case 7: return (((x + y) % 2 + (x * y) % 3) % 2) === 0;
+      default: return false;
+    }
+  }
+
+  _addEccAndInterleave(data) {
+    const numEcc = QrCode._getNumEccCodewords(this.version, this.errorCorrectionLevel);
+    const ecc = QrCode._reedSolomonComputeRemainder(data, QrCode._reedSolomonDivisor(numEcc));
+    return data.concat(ecc);
+  }
+
+  static _reedSolomonDivisor(degree) {
+    let result = [1];
+    for (let i = 0; i < degree; i++) {
+      result.push(0);
+      for (let j = result.length - 1; j >= 1; j--) result[j] = result[j] ^ QrCode._reedSolomonMultiply(result[j - 1], QrCode._reedSolomonExp(i));
+      result[0] = QrCode._reedSolomonMultiply(result[0], QrCode._reedSolomonExp(i));
+    }
+    return result;
+  }
+
+  static _reedSolomonComputeRemainder(data, divisor) {
+    const result = Array(divisor.length - 1).fill(0);
+    for (const b of data) {
+      const factor = b ^ result.shift();
+      result.push(0);
+      for (let i = 0; i < result.length; i++) result[i] ^= QrCode._reedSolomonMultiply(divisor[i + 1], factor);
+    }
+    return result;
+  }
+
+  static _reedSolomonMultiply(x, y) {
+    if (x === 0 || y === 0) return 0;
+    return QrCode._rsExp[(QrCode._rsLog[x] + QrCode._rsLog[y]) % 255];
+  }
+
+  static _reedSolomonExp(i) {
+    return QrCode._rsExp[i];
+  }
+
+  _getPenaltyScore() {
+    const s = this.size;
+    let result = 0;
+
+    for (let y = 0; y < s; y++) {
+      let runColor = false;
+      let runLen = 0;
+      for (let x = 0; x < s; x++) {
+        const color = this.modules[y][x];
+        if (x === 0 || color !== runColor) {
+          if (runLen >= 5) result += 3 + (runLen - 5);
+          runColor = color;
+          runLen = 1;
+        } else runLen++;
+      }
+      if (runLen >= 5) result += 3 + (runLen - 5);
+    }
+    for (let x = 0; x < s; x++) {
+      let runColor = false;
+      let runLen = 0;
+      for (let y = 0; y < s; y++) {
+        const color = this.modules[y][x];
+        if (y === 0 || color !== runColor) {
+          if (runLen >= 5) result += 3 + (runLen - 5);
+          runColor = color;
+          runLen = 1;
+        } else runLen++;
+      }
+      if (runLen >= 5) result += 3 + (runLen - 5);
+    }
+
+    for (let y = 0; y < s - 1; y++) {
+      for (let x = 0; x < s - 1; x++) {
+        const c = this.modules[y][x];
+        if (c === this.modules[y][x + 1] && c === this.modules[y + 1][x] && c === this.modules[y + 1][x + 1]) result += 3;
+      }
+    }
+
+    let black = 0;
+    for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) if (this.modules[y][x]) black++;
+    const total = s * s;
+    const k = Math.abs(black * 20 - total * 10) / total;
+    result += Math.floor(k) * 10;
+
+    return result;
+  }
+
+  static _appendBits(dst, val, len) {
+    for (let i = len - 1; i >= 0; i--) dst.push((val >>> i) & 1);
+  }
+
+  static _getTotalBits(segs, version) {
+    let sum = 0;
+    for (const seg of segs) {
+      const ccbits = seg.mode.numBitsCharCount(version);
+      if (seg.numChars >= (1 << ccbits)) return null;
+      sum += 4 + ccbits + seg.bitData.length;
+    }
+    return sum;
+  }
+
+  static _getNumDataCodewords(ver, ecl) {
+    return QrCode._DATA_CODEWORDS[(ver - 1) * 4 + ecl.ordinal];
+  }
+
+  static _getNumEccCodewords(ver, ecl) {
+    return QrCode._ECC_CODEWORDS[(ver - 1) * 4 + ecl.ordinal];
+  }
+}
+
+QrCode.Ecc = class {
+  constructor(ordinal, formatBits) {
+    this.ordinal = ordinal;
+    this._formatBits = formatBits;
+  }
+  static _formatBits(ecl) {
+    return ecl._formatBits;
+  }
+};
+QrCode.Ecc.LOW = new QrCode.Ecc(0, 1);
+QrCode.Ecc.MEDIUM = new QrCode.Ecc(1, 0);
+QrCode.Ecc.QUARTILE = new QrCode.Ecc(2, 3);
+QrCode.Ecc.HIGH = new QrCode.Ecc(3, 2);
+
+QrCode._DATA_CODEWORDS = [
+  19, 16, 13, 9,
+  34, 28, 22, 16,
+  55, 44, 34, 26,
+  80, 64, 48, 36,
+  108, 86, 62, 46,
+  136, 108, 76, 60,
+  156, 124, 88, 66,
+  194, 154, 110, 86,
+  232, 182, 132, 100,
+  274, 216, 154, 122,
+];
+QrCode._ECC_CODEWORDS = [
+  7, 10, 13, 17,
+  10, 16, 22, 28,
+  15, 26, 36, 44,
+  20, 36, 52, 64,
+  26, 48, 72, 88,
+  36, 64, 96, 112,
+  40, 72, 108, 130,
+  48, 88, 132, 156,
+  60, 110, 160, 192,
+  72, 130, 192, 224,
+];
+(() => {
+  const rsExp = new Array(256).fill(0);
+  const rsLog = new Array(256).fill(0);
+  let x = 1;
+  for (let i = 0; i < 255; i++) {
+    rsExp[i] = x;
+    rsLog[x] = i;
+    x <<= 1;
+    if (x & 0x100) x ^= 0x11d;
+  }
+  rsExp[255] = rsExp[0];
+  QrCode._rsExp = rsExp;
+  QrCode._rsLog = rsLog;
+})();
+
 
 function recentAppointmentsCard() {
   const rows = state.appointments
@@ -2651,6 +3344,11 @@ function currentRoute() {
 }
 
 function render() {
+  if (!isAuthed()) {
+    showLoginView();
+    return;
+  }
+  hideLoginView();
   const route = currentRoute();
   const fallback = CONTEXT === "central" ? "/central" : "/dashboard";
   const view = routes[route] || routes[fallback] || routes["/dashboard"];
@@ -4445,6 +5143,34 @@ function wireQuickActions() {
   });
 }
 
+function wireAuthUI() {
+  const topbarRight = $(".topbar-right");
+  if (!topbarRight) return;
+
+  if (!document.getElementById("logoutBtn")) {
+    const userPill = el("div", { class: "pill", id: "userPill", style: "gap:8px" }, [
+      el("span", { class: "pill-dot", "aria-hidden": "true", style: "background: var(--good)" }),
+      el("span", { id: "userLabel" }, [document.createTextNode(isAuthed() ? (authRead()?.user || "admin") : "Signed out")]),
+    ]);
+
+    const btn = el("button", {
+      class: "btn btn-ghost",
+      id: "logoutBtn",
+      type: "button",
+      onclick: () => {
+        authClear();
+        toast("Signed out", "Session ended.");
+        render();
+      },
+    }, [document.createTextNode("Logout")]);
+
+    topbarRight.append(userPill, btn);
+  }
+
+  const label = document.getElementById("userLabel");
+  if (label) label.textContent = isAuthed() ? (authRead()?.user || "admin") : "Signed out";
+}
+
 function quickBtn(title, subtitle, onClick) {
   return el("button", { class: "card", type: "button", onclick: () => { $("#modal").close(); onClick(); } }, [
     el("div", { class: "card-title" }, [document.createTextNode(title)]),
@@ -4480,6 +5206,7 @@ function init() {
   wireGlobalSearch();
   wireReset();
   wireQuickActions();
+  wireAuthUI();
   wireSidebarToggle();
   wireClock();
   render();
